@@ -90,7 +90,7 @@ Source: `docker-compose.yml`.
 | P1-07 | Response cache may reuse account-dependent results across callers | Unresolved dependency behavior | Verify locked middleware cache key; add isolation test or disable |
 | P1-08 | Full Go session lifecycle is not yet traced end-to-end | Source trace completed; lifecycle is still single-client and graceful shutdown incomplete | Implement per-account manager with cancellation, handler cleanup, server shutdown and lifecycle tests |
 | P1-09 | Baseline Python/Go commands have not been executed | Existing CI run #2 succeeded on pre-hardening source commit `6c1ba7a`; new hardening CI run #6 queued at time of update | Review the post-change CI run and retain job evidence; format checks remain outside current CI |
-| P1-10 | Production backup/volume restore path is unverified | Open | Confirm deployment volume layout and rehearse backup/restore before migration |
+| P1-10 | Production backup/volume restore path is unverified | Still open; Compose mounts are source-confirmed but no backup/restore was executed | See updated risk register below |
 
 ## What is still required to exit Phase 1
 
@@ -103,7 +103,7 @@ Source: `docker-compose.yml`.
 
 ## Phase 1 conclusion
 
-Source inspection strengthens the original risk assessment and identifies concrete authorization and audit fail-open/attribution concerns. **Phase 1 remains open.** No runtime code or database was changed, no tests were executed, and no migration is approved by this document.
+At the time of this initial trace, no runtime code or database had been changed and no tests had been executed. The follow-up below records the later focused authorization code/test changes and CI evidence. **Phase 1 remains open**, and no storage migration is approved by this document.
 
 
 ---
