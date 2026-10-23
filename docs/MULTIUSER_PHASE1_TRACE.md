@@ -82,7 +82,7 @@ Source: `docker-compose.yml`.
 | ID | Risk | Evidence status | Required resolution |
 |---|---|---|---|
 | P1-01 | Multiple tokens share one WhatsApp identity/data set | Confirmed by config/resource layout | Trusted principal + account registry + account-scoped service handles |
-| P1-02 | Missing tool-scope metadata can bypass checks | Original fail-open confirmed; explicit policies added for all 98 registered + meta tools by source comparison; CI pending for this change | Keep fail-closed behavior and require registry-vs-policy coverage test in CI |
+| P1-02 | Missing tool-scope metadata can bypass checks | Original fail-open confirmed; explicit policies added for all 98 registered + meta tools by source comparison; CI run #6 found one missing policy (`set_chat_note`); that entry was added after the failing run; verification of the follow-up revision is still pending | Keep fail-closed behavior and require registry-vs-policy coverage test in CI |
 | P1-03 | Audit logs attribute every caller to `owner` | Confirmed | Derive identity from authenticated context |
 | P1-04 | Message DB is shared and keyed by chat/message identifiers | Confirmed | Separate per-account stores; no cross-account fallback |
 | P1-05 | Scheduler/drafts and identity cache are process/global-store scoped | Confirmed | Account-bound rows/paths/cache keys and per-account worker dispatch |
@@ -196,7 +196,7 @@ Authoritative CI is `.github/workflows/ci.yml`. The repository CI run **#2 / run
 | Go build | `go build -tags sqlite_fts5 -trimpath -ldflags="-s -w" -o /dev/null .` | exit 0 |
 | Secret scan | `gitleaks git . --no-banner --redact --exit-code 1` after downloading pinned 8.24.3 CLI | exit 0 |
 
-No explicit `gofmt -d` or `ruff format --check` is configured in CI; the workflow comments say Ruff formatting is deliberately not enforced. These checks have not been executed independently in this audit. CI run #6 / `39940720303` was queued after the focused authorization changes; its completion and logs must be reviewed before treating those changes as verified. Live WhatsApp smoke tests, tool-search evaluation, voice harness, backup/restore, and production data checks have not been run.
+No explicit `gofmt -d` or `ruff format --check` is configured in CI; the workflow comments say Ruff formatting is deliberately not enforced. These checks have not been executed independently in this audit. CI run #6 / `39940720303` completed: Go vet/staticcheck/tests/build and Gitleaks succeeded, Python lint and locked sync succeeded, but pytest failed (1 failed, 103 passed) because the registry-coverage assertion found `set_chat_note` missing. The missing policy entry was added in commit `7a1cfec`; that run predates the fix. A successful post-fix run has not yet been observed, so the authorization change remains unverified. Live WhatsApp smoke tests, tool-search evaluation, voice harness, backup/restore, and production data checks have not been run.
 
 Reproducible local commands from repository root:
 
@@ -247,19 +247,19 @@ This is a runbook proposal, **not a completed backup/restore test**. A productio
 | ID | Risk | Status after this follow-up | Required closure evidence |
 |---|---|---|---|
 | P1-01 | Multiple tokens share one WhatsApp identity/data set | Confirmed, unresolved | Trusted principal/account registry and per-account service handles |
-| P1-02 | Missing tool-scope metadata can bypass checks | Code hardened; post-change CI pending | CI green; coverage test enumerates all 98 names; add middleware-level negative test if needed |
+| P1-02 | Missing tool-scope metadata can bypass checks | Code hardened; CI run #6 failed on one missing `set_chat_note` policy, then policy was added; post-fix CI not yet observed | Green post-fix CI; coverage test enumerates all 98 names; consider middleware-level negative test |
 | P1-03 | Audit identity hard-coded to owner | Confirmed, unresolved | Trusted request principal propagation and audit tests |
 | P1-04 | Shared message DB and global client | Confirmed, unresolved | Per-account stores/session manager; cross-account negative tests |
 | P1-05 | Scheduler/drafts/identity cache are global | Confirmed, unresolved | Account-aware schema, cache key, worker dispatch and isolation tests |
 | P1-06 | Media/signed URLs not account-bound | Confirmed, unresolved | Account-bound claims and authorization-before-file-access tests |
 | P1-07 | Response cache partitioning | Unproven | Disable account-dependent caching or prove trusted principal/account keying with cross-principal test |
 | P1-08 | Go lifecycle assumes one client and incomplete shutdown | Fully source-traced; design unresolved | Lifecycle manager, QR cancellation, per-account event routing, server shutdown, worker join tests |
-| P1-09 | Baseline verification | Baseline CI green; post-hardening CI pending | Review run #6, add/execute formatting check, retain post-change job evidence |
+| P1-09 | Baseline verification | Baseline CI green; post-hardening run #6 failed on coverage test; fix committed afterward | Obtain green post-fix CI; add/execute formatting check and retain job evidence |
 | P1-10 | Backup/restore | Unverified; no production access in this environment | Cold backup and restore into a disposable volume, integrity/checksum evidence |
 | P1-11 | Transcription/transient path inventory | Entry points identified; full module/temp-path trace incomplete | Local inspect transcription module, cache/worker/temp paths and add cleanup/partition tests |
 
 ### Phase 1 status and next step
 
-**Phase 1 remains OPEN.** The source lifecycle is now traced, and a focused deny-by-default authorization change plus tests has been committed, but the post-change CI result must be inspected. The account-dependent data paths still need a local end-to-end trace, response-cache partitioning is unproven, and backup/restore has not been rehearsed on a safe copy.
+**Phase 1 remains OPEN.** The source lifecycle is now traced, and a focused deny-by-default authorization change plus tests has been committed, and the first post-change CI run exposed a missing `set_chat_note` policy, which was fixed after that run; a green post-fix CI run is still required. The account-dependent data paths still need a local end-to-end trace, response-cache partitioning is unproven, and backup/restore has not been rehearsed on a safe copy.
 
 Do not start storage migration, pair a second account, alter live session files, or close Phase 1 until those blockers have evidence. Once Phase 1 closes, the smallest safe first implementation step is a Go-only session-manager interface plus deterministic fake lifecycle tests, with no storage migration and no changes to the legacy single-session runtime path. Rollback is reverting that isolated commit; existing `store/whatsapp.db` and `store/messages.db` remain untouched.
