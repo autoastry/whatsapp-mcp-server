@@ -263,3 +263,54 @@ This is a runbook proposal, **not a completed backup/restore test**. A productio
 **Phase 1 remains OPEN.** The Go singleton lifecycle is source-traced, and the fail-closed authorization changes plus registry coverage tests pass the latest CI run (#14, `39941240084`). This is CI evidence, not a local run. Response caching is still unsafe to enable for multiple principals until disabled or proven to partition by trusted principal/account. The local transient-state exercise and safe-copy backup/restore rehearsal have not been completed.
 
 Do not start storage migration, pair a second account, alter live session files, or close Phase 1 until those blockers have evidence. Once Phase 1 closes, the smallest safe first implementation step is a Go-only session-manager interface plus deterministic fake lifecycle tests, with no storage migration and no changes to the legacy single-session runtime path. Rollback is reverting that isolated commit; existing `store/whatsapp.db` and `store/messages.db` remain untouched.
+
+
+---
+
+## Follow-up evidence — cache mitigation and latest CI (2026-10-23)
+
+### Current branch and CI evidence
+
+- Branch: `feature/multi-user-platform-audit`; comparison against `main` reports 19 commits ahead and 0 behind before the cache-mitigation commit.
+- Latest completed CI run before the cache-mitigation change: run #16, ID `39941613651`, on commit `a053f4a758f8d10d1d3ac0d128a1cd0920904e87`. GitHub reports conclusion `success` for all three jobs:
+  - Python lint + tests: success (includes `uvx ruff@0.8 check .`, locked `uv sync`, and `pytest`).
+  - Go lint + test + build: success (includes `go vet -tags sqlite_fts5 ./...`, staticcheck, `go test -tags sqlite_fts5 ./...`, and build).
+  - Secret scan: success (Gitleaks).
+- This is actual hosted CI evidence for that exact revision, not a local checkout run. It does not cover live WhatsApp pairing, production volume contents, a cold backup/restore, or independent `gofmt`/Ruff-format execution.
+- After reviewing cache behavior, commit `90185b8512a124b3248e9b32bef800bf1c3e10cd` removes the FastMCP response-caching middleware and its import from `whatsapp-mcp-server/server.py`. The branch's CI must be checked again for this newer commit before claiming that change passed. Caching is intentionally disabled because the installed middleware's cache-key partitioning by authenticated principal and WhatsApp account was not proven. Do not re-enable it until cache partitioning and cross-principal tests exist.
+
+### Revised risk register
+
+| ID | Status | Finding | Evidence / next action |
+|---|---|---|---|
+| P1-01 | Confirmed, unresolved | Multiple valid tokens still reach the same process-level WhatsApp client and shared resources; tokens do not define account ownership. | Add trusted principal identity and explicit account ownership before account-scoped operations. |
+| P1-02 | Focused mitigation committed; CI for latest commit pending | Direct and dispatcher authorization now deny missing policy/context, and policy coverage is checked by boot test. CI #16 passed on the preceding revision. | Check CI on `90185b8512a124b3248e9b32bef800bf1c3e10cd`; add explicit negative tests for unmapped tools and malformed token configuration. |
+| P1-03 | Confirmed, unresolved | Audit records still hard-code `client_id="owner"`; authenticated caller attribution is not yet propagated into audit rows. | Add request-context attribution and tests proving distinct principals are recorded without secrets. |
+| P1-04 | Confirmed, unresolved | One message DB and one Go client/device store are shared. | No second account pairing; implement account-scoped handles only after gates close. |
+| P1-05 | Confirmed, unresolved | Scheduler/drafts and identity mappings/caches are global or single-store scoped. | Inventory and implement explicit owner/account binding and worker routing. |
+| P1-06 | Confirmed requirement, implementation unresolved | Media directory and signed links are not shown to enforce a WhatsApp account ownership boundary. | Add account-bound signed claims and authorize before filesystem access; test cross-account denial. |
+| P1-07 | Mitigation committed; verification pending | Response caching was enabled without proof that keys include trusted principal/account identity. Middleware has now been removed from `server.py`. | Confirm latest CI and add a regression test that account-dependent tool responses cannot be served from a shared cache if caching is ever reintroduced. |
+| P1-08 | Source-traced, unresolved | One Go whatsmeow client, device store, message store, QR path, and event-handler closure; incomplete coordinated shutdown and no explicit logout lifecycle operation. | Build a small session-manager seam and deterministic lifecycle tests after Phase 1, using the pinned whatsmeow API. |
+| P1-09 | Partially verified | Hosted CI #16 succeeded on `a053f4a`; no local checkout or shell was available in this environment. | Check new commit CI; independent formatting and live integration remain unexecuted. |
+| P1-10 | Unverified | Compose source defines `wa-store`, `wa-audit`, and `wa-media`; actual deployed volume contents and restore are inaccessible. | Cold backup/restore on disposable copied volumes is a mandatory blocker; do not touch production data. |
+| P1-11 | Source-traced, runtime cleanup unresolved | Transcription, temp media, short URLs, background queues and other transient state have shared paths/workers. | Test cancellation, cleanup and account routing with isolated fixtures before multi-user enablement. |
+
+### Exact execution record
+
+No local command was executed in this environment: the available repository access was through GitHub's file/CI APIs and provided no checkout shell or Docker daemon. Therefore there are no local exit codes to report. The hosted CI result above is the only newly confirmed execution evidence. The relevant reproducible commands are:
+
+```bash
+uvx ruff@0.8 check .
+uv sync --locked --project whatsapp-mcp-server
+uv run --locked --project whatsapp-mcp-server pytest
+(cd whatsapp-bridge && go vet -tags sqlite_fts5 ./...)
+(cd whatsapp-bridge && go run honnef.co/go/tools/cmd/staticcheck@2025.1 -tags sqlite_fts5 ./...)
+(cd whatsapp-bridge && go test -tags sqlite_fts5 ./...)
+(cd whatsapp-bridge && go build -tags sqlite_fts5 -trimpath -ldflags="-s -w" -o /dev/null .)
+```
+
+### Backup/restore evidence boundary
+
+No database or volume was opened, copied, overwritten, restored, or migrated. A procedure written in architecture documentation is not proof of recovery. Restore rehearsal remains blocked on access to a disposable copy of the deployed `wa-store`, `wa-audit`, and `wa-media` volumes (or an equivalent isolated fixture set). A consistent backup must quiesce writers or use SQLite's supported backup/checkpoint approach; copying a live SQLite main file without its WAL state risks an inconsistent snapshot. Preserve the source data read-only and validate the copy with SQLite integrity checks and application-level reads.
+
+**Phase 1 remains OPEN.** The cache middleware removal reduces one identified risk but does not establish tenant isolation, caller attribution, ownership checks, production backup safety, or live-session recovery.
