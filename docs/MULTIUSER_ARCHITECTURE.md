@@ -9,7 +9,7 @@ Status: design proposal; Phase 1 remains open; focused authorization hardening i
 
 This document defines the intended ownership and service boundaries before implementation. It is based on files inspected through GitHub, including whatsapp-bridge/main.go, whatsapp-mcp-server/server.py, observability.py, whatsapp.py, tools.py, toolsearch.py, scheduling.py, media.py, identity.py, CI, tests, and deployment configuration.
 
-Evidence update (2026-10-23): the complete Go singleton lifecycle and registered-tool policy coverage have now been traced through GitHub source. A deny-by-default policy change and focused tests are committed on the feature branch. Post-change CI run #6 failed one registry-coverage test (the missing `set_chat_note` policy); that policy was added in commit `7a1cfec`, but a green post-fix run has not yet been observed. Existing CI run #2 passed the documented Python/Go baseline commands on the pre-hardening source revision. The GitHub integration still provides no local shell or Docker daemon, so no local command execution or safe-volume backup/restore rehearsal was possible. The choices below remain target architecture only; no storage migration or second account has been started.
+Evidence update (2026-10-23): the complete Go singleton lifecycle and registered-tool policy coverage have now been traced through GitHub source. A deny-by-default policy change and focused tests are committed on the feature branch. CI run #6 first failed registry coverage because `set_chat_note` was missing; that entry was added, and post-fix CI run #14 passed on commit `857634eec986500d6c4760669f241a678c6c1b28`. Existing CI run #2 passed the documented Python/Go baseline commands on the pre-hardening source revision. The GitHub integration still provides no local shell or Docker daemon, so no local command execution or safe-volume backup/restore rehearsal was possible. Post-fix CI run #14 (39941240084) passed Python lint/tests, Go vet/staticcheck/tests/build, and Gitleaks on the current source revision. The choices below remain target architecture only; no storage migration or second account has been started.
 
 ## 2. Required security invariants
 
@@ -152,7 +152,7 @@ No acceptance criterion is satisfied merely because a test file exists. Report a
 
 ## 11. Sequencing and phase exit criteria
 
-- Phase 1 (this document): establish target ownership, lifecycle, storage boundary, bridge trust, migration and acceptance gates. The Go singleton lifecycle has been source-traced and baseline CI passed on the pre-hardening revision, but Phase 1 exit remains blocked on post-hardening CI, full transcription/transient-state trace, cache-isolation proof or a decision to disable account-dependent caching, and a cold backup/restore rehearsal on a disposable copy.
+- Phase 1 (this document): establish target ownership, lifecycle, storage boundary, bridge trust, migration and acceptance gates. The Go singleton lifecycle has been source-traced and baseline CI passed on the pre-hardening revision, but Phase 1 exit remains blocked on a local transient-state exercise, cache-isolation proof or a decision to disable account-dependent caching before multi-user enablement, and a cold backup/restore rehearsal on a disposable copy. CI run #14 is green, but no local commands were executed in this environment.
 - Phase 2: implement the Go session manager behind interfaces and lifecycle fakes; do not migrate storage yet.
 - Phase 3: implement registry migrations and account-scoped storage with verified legacy adoption/rollback.
 - Phase 4: thread trusted identity/account context through Python tools, call_tool, media, scheduler, and bridge client.
@@ -169,15 +169,20 @@ No acceptance criterion is satisfied merely because a test file exists. Report a
 - baseline outputs for the documented Python and Go commands;
 - confirmation of current production volume mounts and a verified backup/restore path.
 
-The current GitHub-only environment cannot produce those local execution results. Do not describe tests as passing or migration as safe until those gates are completed.
+The current GitHub-only environment cannot produce local execution or volume-restore evidence. CI run #14 is green for the repository's configured checks, but independent formatting checks, live-session tests, and backup/restore remain unexecuted. Do not describe migration as safe until those gates are completed.
 
 
 ## Phase 1 evidence update — 2026-10-23
 
 - Source trace now covers the single Go client/device-store construction, QR path, event handler, whatsmeow auto-reconnect behavior, absence of a logout API, fixed singleton REST handlers, and incomplete graceful shutdown. See `docs/MULTIUSER_PHASE1_TRACE.md`.
-- Mechanical source comparison found 96 registered regular tools plus `find_tool` and `call_tool`. The scope table has been extended and middleware/dispatcher checks now deny missing policy and missing caller context instead of allowing. Automated coverage tests were added. CI run #6 reported 1 failed and 103 passed because `set_chat_note` was missing from the policy map; the missing entry was committed afterward, and post-fix CI remains unverified.
+- Mechanical source comparison found 96 registered regular tools plus `find_tool` and `call_tool`. The scope table has been extended and middleware/dispatcher checks now deny missing policy and missing caller context instead of allowing. Automated coverage tests were added. CI run #6 reported 1 failed and 103 passed because `set_chat_note` was missing from the policy map; the missing entry was committed afterward, and CI run #14 passed on the corrected source revision.
 - Baseline CI run #2 succeeded for Python lint/tests, Go vet/staticcheck/tests/build, and Gitleaks on the pre-hardening revision. This is CI evidence, not a local run from the connector environment. Ruff format and gofmt checks are not currently part of authoritative CI.
 - Current compose volume mapping is confirmed from source: `wa-store` bridge read/write and MCP read-only; `wa-audit` stores audit, scheduling, transcription and short-link DB paths; `wa-media` stores decrypted media cache. These are configuration observations, not inspection of the live volume contents.
 - No live data was opened, copied, modified, migrated, or restored. Backup/restore remains unverified because the environment has no Docker daemon or production host access.
 
 **Phase 1 is not closed.** No account-scoped storage migration or multi-session runtime changes are authorized by this design addendum. The smallest first implementation after the gates close remains a Go session-manager interface and fake lifecycle tests, behind a compatibility-preserving seam, with a revert-only rollback and no live database changes.
+
+
+## Updated verification status — 2026-10-23
+
+Post-fix CI run #14 (39941240084) completed successfully on commit `857634eec986500d6c4760669f241a678c6c1b28`. The Python lint, locked dependency install, pytest, Go vet, staticcheck, Go test, Go build, and Gitleaks jobs all succeeded. This is CI evidence, not an independent local run. The response cache configuration is still not suitable evidence of tenant partitioning: the source comment says cache results are keyed on tool arguments and does not establish inclusion of trusted principal/account. Disable account-dependent caching before enabling multiple principals unless the locked middleware implementation and cross-principal test prove isolation.
