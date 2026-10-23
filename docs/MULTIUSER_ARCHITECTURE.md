@@ -195,3 +195,85 @@ The previous section's cache warning has been acted on: commit `90185b8512a124b3
 The latest completed CI run before that change was run #16 (`39941613651`) on `a053f4a758f8d10d1d3ac0d128a1cd0920904e87`; Python lint/tests, Go vet/staticcheck/tests/build, and Gitleaks all succeeded on that revision. CI for the cache-removal commit and following documentation commits must be checked separately. No local test commands were executed because no repository checkout shell was available. No Docker volumes or live data were accessed; cold backup/restore is still unverified.
 
 Phase 1 remains open. Required blockers include CI on the current branch head, caller-aware audit attribution, negative authorization/configuration tests, account ownership and cross-account denial tests, transient-worker cleanup verification, and a cold restore rehearsal against disposable data. Do not pair another WhatsApp account or begin storage migration until these gates have evidence.
+
+
+## Next implementation milestone proposal — identity and account ownership foundation
+
+**Status: design only; not wired into runtime.** Phase 1 is still open, so this proposal must not be interpreted as permission to change session storage, pair another account, or migrate live data. The latest branch CI run #24 (`39942762986`) succeeded for Python lint/tests, Go vet/staticcheck/tests/build, and Gitleaks on the then-current trace commit. This does not satisfy the unexecuted backup/restore rehearsal or resolve branch-history divergence: the compare API still reports 25 commits ahead and 2 behind `main`.
+
+### Trust model
+
+Keep the current static-token compatibility path initially, but distinguish three separate concepts:
+
+1. **Principal**: a stable platform identity authenticated by the MCP verifier. It must come from trusted server-side token metadata, never from a tool argument or caller-supplied header.
+2. **WhatsApp account**: an opaque platform-generated account ID. It represents a linked-device session, not the WhatsApp phone number and not the bearer token.
+3. **Ownership grant**: an explicit relation authorizing a principal to operate a given account, with role/state and revocation. Every account-scoped operation must resolve this grant before touching message history, media, scheduling, or the Go bridge.
+
+The current `client_id` in token metadata is configuration-provided and audit code hard-codes `owner`; do not silently assume the FastMCP token object exposes that metadata as a trusted principal until an integration test proves the exact locked-version API. Add a small adapter at the authentication boundary and test its output from the real FastMCP context. If identity cannot be resolved, deny account-scoped access.
+
+### Proposed registry schema (new platform-owned SQLite DB; no legacy DB migration in the first commit)
+
+```sql
+CREATE TABLE platform_principals (
+  principal_id TEXT PRIMARY KEY,
+  status TEXT NOT NULL CHECK (status IN ('active','disabled')),
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE whatsapp_accounts (
+  account_id TEXT PRIMARY KEY,
+  status TEXT NOT NULL CHECK (status IN
+    ('pending_pairing','active','disconnected','revoked','error')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE account_ownership (
+  principal_id TEXT NOT NULL REFERENCES platform_principals(principal_id),
+  account_id TEXT NOT NULL REFERENCES whatsapp_accounts(account_id),
+  role TEXT NOT NULL CHECK (role IN ('owner','operator','reader')),
+  status TEXT NOT NULL CHECK (status IN ('active','revoked')),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (principal_id, account_id)
+);
+
+CREATE INDEX account_ownership_by_account
+  ON account_ownership(account_id, status);
+```
+
+Use opaque random IDs, not phone numbers, JIDs, tokens, or user-controlled strings. Store token hashes/secret material separately from the ownership registry; never store bearer tokens in audit records. Apply foreign keys and transactions. The initial schema commit should only create a module and tests against a temporary SQLite path; it must not automatically open or migrate `store/whatsapp.db`, `messages.db`, or deployment volumes.
+
+### Proposed modules and integration order
+
+1. **Python identity/ownership module** (new): principal/account/ownership types, repository interface, SQLite implementation on an explicitly configured platform DB path, and a single `require_account_access(principal, account_id, action)` function that denies missing principal, unknown account, disabled/revoked principal, missing grant, revoked grant, and unsupported role/action.
+2. **Authentication adapter** in `server.py`: derive principal exclusively from authenticated token metadata returned by the installed FastMCP version. Add a test with two distinct token identities through the real in-memory FastMCP client before relying on this field. Fail startup if multi-user mode is enabled but identity mapping is not supported.
+3. **Authorization integration**: update both direct middleware and `call_tool` dispatch to use the same policy and request context. Existing scope checks remain necessary; ownership is an additional check, not a replacement.
+4. **Audit attribution** in `observability.py` and `toolsearch.py`: record the authenticated principal ID and authorized account ID, never `owner` or a caller-supplied identity. Include denied attempts and outcome while redacting arguments.
+5. **Go seam**: only after Phase 1 closes, define a session-manager interface around the pinned whatsmeow version. The existing singleton implementation remains the default adapter. Fake session tests should prove event routing, cancellation, lock behavior and cleanup before introducing a second client.
+6. **Data routing**: after registry/identity tests are stable, thread the resolved account context into Python tool handlers, media claims, scheduler rows/workers, identity mappings, and the bridge request protocol. No request may select an account merely by passing an arbitrary account ID.
+
+### Backward compatibility and migration
+
+- Keep current single-account mode working behind an explicit legacy mapping (e.g. the configured legacy principal mapped to one generated account ID). Do not infer ownership solely from token scope.
+- Do not automatically attach existing session files to a new principal at startup. Adoption must be an explicit operator-controlled command with a dry-run report and a verified backup.
+- The first registry migration should be additive: create a new platform registry database, leaving the legacy WhatsApp device and message databases unchanged.
+- For rollout, run in audit/shadow mode first: resolve the legacy account and log policy decisions without changing existing tool routing. Switch account-scoped enforcement on only after parity and denial tests pass.
+- Never dual-write the same WhatsApp message or session into multiple account stores as a shortcut.
+
+### Required tests before enabling any multi-user runtime path
+
+- Principal extraction from actual FastMCP authentication context; missing/ambiguous identity denied.
+- Principal disabled/revoked, account absent/revoked/disconnected, and grant absent/revoked denied.
+- User A can access only A's account; User B can access only B's account; a shared account is accessible only if an explicit grant exists.
+- Direct tool calls and `call_tool` dispatcher have identical scope + ownership outcomes.
+- Audit records attribute A/B distinctly and contain no tokens, message bodies, QR payloads or signed media URLs.
+- Media signed claims are account-bound and authorization is checked before filesystem access.
+- Scheduler/drafts/notes and background retries re-check ownership at dispatch time.
+- Legacy mode regression suite passes with no schema changes to the legacy DB.
+- Run Python tests/lint, Go tests/vet/staticcheck/build, `ruff format --check`, and `gofmt -d`; live linked-device tests remain a separately authorized test-account gate.
+
+### Rollback
+
+Before enforcement, the new registry is additive and can be disabled by configuration; legacy session and message DBs remain untouched. Keep the legacy singleton adapter as default until the feature flag is explicitly enabled. If any post-deployment issue occurs, disable multi-user mode and revert the isolated ownership/session commits; do not delete registry rows or restore over live databases as a rollback shortcut. Restore rehearsal and recorded hashes are prerequisites for any production rollout.
+
+**Decision:** do not begin runtime account-session implementation until the backup/restore rehearsal is evidenced and the branch/main divergence is reviewed. The next code PR should be limited to the isolated ownership registry + pure authorization policy + tests, without connecting it to message tools or the Go session lifecycle.
