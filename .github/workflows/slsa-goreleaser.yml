@@ -1,0 +1,23 @@
+# Generate a Go binary and SLSA Build Level 3 provenance.
+# The reusable builder is pinned to a full semantic version as required by
+# slsa-github-generator. The project currently uses Go 1.25.0; read it from
+# whatsapp-bridge/go.mod instead of pinning an incompatible Go 1.17.
+name: SLSA Go releaser
+
+on:
+  workflow_dispatch:
+  release:
+    types: [created]
+
+permissions: read-all
+
+jobs:
+  build:
+    permissions:
+      id-token: write # Sign provenance.
+      contents: write # Upload binary/provenance assets to a GitHub release.
+      actions: read   # Read the calling workflow path.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/builder_go_slsa3.yml@v2.1.0
+    with:
+      go-version-file: whatsapp-bridge/go.mod
+      config-file: .slsa-goreleaser.yml
