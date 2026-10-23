@@ -241,3 +241,20 @@ class TestDispatchAuthorization:
         monkeypatch.setattr(dependencies, "get_access_token", lambda: None)
         with pytest.raises(ToolError, match="context is missing"):
             toolsearch._enforce_scope("send_message")
+
+
+    def test_policy_import_failure_is_denied(self, toolsearch, monkeypatch):
+        pytest.importorskip("fastmcp")
+        import builtins
+        from fastmcp.exceptions import ToolError
+
+        real_import = builtins.__import__
+
+        def broken_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "observability" and "TOOL_SCOPES" in fromlist:
+                raise ImportError("simulated missing policy module")
+            return real_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", broken_import)
+        with pytest.raises(ToolError, match="policy is unavailable"):
+            toolsearch._enforce_scope("send_message")
