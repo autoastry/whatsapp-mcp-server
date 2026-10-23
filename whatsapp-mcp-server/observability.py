@@ -243,6 +243,7 @@ TOOL_SCOPES: dict[str, str] = {
     "list_scheduled": "whatsapp:read",
     "list_drafts": "whatsapp:read",
     "get_chat_note": "whatsapp:read",
+    "set_chat_note": "whatsapp:send",
     "list_chat_notes": "whatsapp:read",
     "send_sticker": "whatsapp:send",
     "vote_in_poll": "whatsapp:send",
