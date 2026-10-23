@@ -26,14 +26,20 @@ SERVER_DIR = Path(__file__).resolve().parents[2] / "whatsapp-mcp-server"
 
 PROBE = """
 import asyncio, json
-import server
+import server, toolsearch
+from observability import TOOL_SCOPES
 from fastmcp import Client
 
 async def main():
     async with Client(server.mcp) as client:
         tools = await client.list_tools()
         prompts = await client.list_prompts()
-    print(json.dumps({"tools": sorted(t.name for t in tools), "prompts": len(prompts)}))
+    # toolsearch captures the full registry before minimal-mode pruning, so this
+    # checks the long tail as well as the directly exposed tools and meta-tools.
+    names = set(toolsearch._LIBRARY) | {t.name for t in tools}
+    missing = sorted(name for name in names if name not in TOOL_SCOPES)
+    print(json.dumps({"tools": sorted(t.name for t in tools), "prompts": len(prompts),
+                      "policy_missing": missing, "registered_count": len(names)}))
 
 asyncio.run(main())
 """
@@ -45,6 +51,7 @@ def test_server_boots_and_registers_tools(tmp_path):
     env = {
         **os.environ,
         "WHATSAPP_MCP_TOKEN": "test-token",
+        "WHATSAPP_MCP_TOOLSET": "minimal",
         "MESSAGES_DB_PATH": str(tmp_path / "messages.db"),
         "WHATSMEOW_DB_PATH": str(tmp_path / "whatsapp.db"),
         "WHATSAPP_MCP_SHORT_DB": str(tmp_path / "short.db"),
@@ -59,5 +66,7 @@ def test_server_boots_and_registers_tools(tmp_path):
     assert proc.returncode == 0, proc.stderr[-3000:]
     result = json.loads(proc.stdout.strip().splitlines()[-1])
     assert "bridge_health" in result["tools"], result["tools"]
+    assert result["registered_count"] >= 90, result
+    assert result["policy_missing"] == [], result["policy_missing"]
     assert "send_message" in result["tools"], result["tools"]
     assert result["prompts"] > 0
