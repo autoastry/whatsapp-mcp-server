@@ -186,3 +186,12 @@ The current GitHub-only environment cannot produce local execution or volume-res
 ## Updated verification status — 2026-10-23
 
 Post-fix CI run #14 (39941240084) completed successfully on commit `857634eec986500d6c4760669f241a678c6c1b28`. The Python lint, locked dependency install, pytest, Go vet, staticcheck, Go test, Go build, and Gitleaks jobs all succeeded. This is CI evidence, not an independent local run. The response cache configuration is still not suitable evidence of tenant partitioning: the source comment says cache results are keyed on tool arguments and does not establish inclusion of trusted principal/account. Disable account-dependent caching before enabling multiple principals unless the locked middleware implementation and cross-principal test prove isolation.
+
+
+## Phase 1 follow-up — 2026-10-23
+
+The previous section's cache warning has been acted on: commit `90185b8512a124b3248e9b32bef800bf1c3e10cd` removes `ResponseCachingMiddleware` from `whatsapp-mcp-server/server.py` until the locked dependency's cache key can be proven to include authenticated principal and authorized account identity. This is a mitigation, not proof of multi-user isolation. A regression test and any future cache design must verify that no account-dependent result can cross principals.
+
+The latest completed CI run before that change was run #16 (`39941613651`) on `a053f4a758f8d10d1d3ac0d128a1cd0920904e87`; Python lint/tests, Go vet/staticcheck/tests/build, and Gitleaks all succeeded on that revision. CI for the cache-removal commit and following documentation commits must be checked separately. No local test commands were executed because no repository checkout shell was available. No Docker volumes or live data were accessed; cold backup/restore is still unverified.
+
+Phase 1 remains open. Required blockers include CI on the current branch head, caller-aware audit attribution, negative authorization/configuration tests, account ownership and cross-account denial tests, transient-worker cleanup verification, and a cold restore rehearsal against disposable data. Do not pair another WhatsApp account or begin storage migration until these gates have evidence.
