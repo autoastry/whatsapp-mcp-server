@@ -196,7 +196,7 @@ Authoritative CI is `.github/workflows/ci.yml`. The repository CI run **#2 / run
 | Go build | `go build -tags sqlite_fts5 -trimpath -ldflags="-s -w" -o /dev/null .` | exit 0 |
 | Secret scan | `gitleaks git . --no-banner --redact --exit-code 1` after downloading pinned 8.24.3 CLI | exit 0 |
 
-No explicit `gofmt -d` or `ruff format --check` is configured in CI; the workflow comments say Ruff formatting is deliberately not enforced. These checks have not been executed independently in this audit. CI run #6 / `39940720303` completed: Go vet/staticcheck/tests/build and Gitleaks succeeded, Python lint and locked sync succeeded, but pytest failed (1 failed, 103 passed) because the registry-coverage assertion found `set_chat_note` missing. The missing policy entry was added in commit `7a1cfec`; that run predates the fix. A successful post-fix run has not yet been observed, so the authorization change remains unverified. Live WhatsApp smoke tests, tool-search evaluation, voice harness, backup/restore, and production data checks have not been run.
+No explicit `gofmt -d` or `ruff format --check` is configured in CI; the workflow comments say Ruff formatting is deliberately not enforced. These checks have not been executed independently in this audit. Post-fix CI run #14 (`39941240084`) completed successfully on commit `857634eec986500d6c4760669f241a678c6c1b28`: Python lint, locked dependency sync, pytest, Go vet, staticcheck, Go tests, Go build, and Gitleaks all passed. The CI job reports the pytest step successful; the exact test count was not exposed by the workflow summary. This validates the committed policy-coverage fix in CI, not in a local shell. Live WhatsApp smoke tests, tool-search evaluation, voice harness, independent formatting checks, backup/restore, and production data checks have not been run.
 
 Reproducible local commands from repository root:
 
@@ -247,19 +247,19 @@ This is a runbook proposal, **not a completed backup/restore test**. A productio
 | ID | Risk | Status after this follow-up | Required closure evidence |
 |---|---|---|---|
 | P1-01 | Multiple tokens share one WhatsApp identity/data set | Confirmed, unresolved | Trusted principal/account registry and per-account service handles |
-| P1-02 | Missing tool-scope metadata can bypass checks | Code hardened; CI run #6 failed on one missing `set_chat_note` policy, then policy was added; post-fix CI not yet observed | Green post-fix CI; coverage test enumerates all 98 names; consider middleware-level negative test |
+| P1-02 | Missing tool-scope metadata can bypass checks | Fail-closed code and policy coverage test committed; latest CI run #14 passed | Keep registry-to-policy coverage test; consider direct middleware test for missing scope map and startup behavior |
 | P1-03 | Audit identity hard-coded to owner | Confirmed, unresolved | Trusted request principal propagation and audit tests |
 | P1-04 | Shared message DB and global client | Confirmed, unresolved | Per-account stores/session manager; cross-account negative tests |
 | P1-05 | Scheduler/drafts/identity cache are global | Confirmed, unresolved | Account-aware schema, cache key, worker dispatch and isolation tests |
 | P1-06 | Media/signed URLs not account-bound | Confirmed, unresolved | Account-bound claims and authorization-before-file-access tests |
-| P1-07 | Response cache partitioning | Unproven | Disable account-dependent caching or prove trusted principal/account keying with cross-principal test |
+| P1-07 | Response cache partitioning | Unsafe for multi-user enablement until proven: server.py comment says results are keyed on arguments; config does not include trusted principal/account | Disable account-dependent caching before multi-user enablement, or inspect locked FastMCP implementation and prove key partitioning with cross-principal test |
 | P1-08 | Go lifecycle assumes one client and incomplete shutdown | Fully source-traced; design unresolved | Lifecycle manager, QR cancellation, per-account event routing, server shutdown, worker join tests |
-| P1-09 | Baseline verification | Baseline CI green; post-hardening run #6 failed on coverage test; fix committed afterward | Obtain green post-fix CI; add/execute formatting check and retain job evidence |
+| P1-09 | Baseline verification | CI run #14 green on current source revision; independent local run and formatting checks still unexecuted | Retain run #14 evidence; execute `gofmt -d .` and decide/document Ruff format policy in a real checkout |
 | P1-10 | Backup/restore | Unverified; no production access in this environment | Cold backup and restore into a disposable volume, integrity/checksum evidence |
 | P1-11 | Transcription/transient path inventory | Transcription source and temp-file paths traced; runtime cleanup/cancellation and full media-cache behavior untested | Local exercise temp cleanup/cancellation, per-account dedup keys, and cache/worker partition tests |
 
 ### Phase 1 status and next step
 
-**Phase 1 remains OPEN.** The source lifecycle is now traced, and a focused deny-by-default authorization change plus tests has been committed, and the first post-change CI run exposed a missing `set_chat_note` policy, which was fixed after that run; a green post-fix CI run is still required. The account-dependent data paths still need a local end-to-end trace, response-cache partitioning is unproven, and backup/restore has not been rehearsed on a safe copy.
+**Phase 1 remains OPEN.** The Go singleton lifecycle is source-traced, and the fail-closed authorization changes plus registry coverage tests pass the latest CI run (#14, `39941240084`). This is CI evidence, not a local run. Response caching is still unsafe to enable for multiple principals until disabled or proven to partition by trusted principal/account. The local transient-state exercise and safe-copy backup/restore rehearsal have not been completed.
 
 Do not start storage migration, pair a second account, alter live session files, or close Phase 1 until those blockers have evidence. Once Phase 1 closes, the smallest safe first implementation step is a Go-only session-manager interface plus deterministic fake lifecycle tests, with no storage migration and no changes to the legacy single-session runtime path. Rollback is reverting that isolated commit; existing `store/whatsapp.db` and `store/messages.db` remain untouched.
