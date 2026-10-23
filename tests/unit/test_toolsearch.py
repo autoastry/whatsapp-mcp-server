@@ -201,3 +201,43 @@ class TestMetaToolsAreNotRecursive:
     def test_meta_names_are_excluded_from_the_library(self, library):
         for name in library._META_NAMES:
             assert name not in library._LIBRARY
+
+
+class TestDispatchAuthorization:
+    """The dynamic dispatcher must fail closed independently of outer middleware."""
+
+    def test_unknown_tool_is_denied(self, toolsearch):
+        pytest.importorskip("fastmcp")
+        from fastmcp.exceptions import ToolError
+
+        with pytest.raises(ToolError, match="policy missing"):
+            toolsearch._enforce_scope("definitely_not_a_registered_tool")
+
+    def test_registered_tool_without_policy_is_denied(self, toolsearch, monkeypatch):
+        pytest.importorskip("fastmcp")
+        from fastmcp.exceptions import ToolError
+        import observability
+
+        monkeypatch.delitem(observability.TOOL_SCOPES, "send_message")
+        with pytest.raises(ToolError, match="policy missing"):
+            toolsearch._enforce_scope("send_message")
+
+    def test_valid_existing_scope_is_preserved(self, toolsearch, monkeypatch):
+        pytest.importorskip("fastmcp")
+        from types import SimpleNamespace
+        from fastmcp.server import dependencies
+
+        monkeypatch.setattr(
+            dependencies, "get_access_token",
+            lambda: SimpleNamespace(scopes=["whatsapp:send"]),
+        )
+        assert toolsearch._enforce_scope("send_message") is None
+
+    def test_missing_authenticated_context_is_denied(self, toolsearch, monkeypatch):
+        pytest.importorskip("fastmcp")
+        from fastmcp.exceptions import ToolError
+        from fastmcp.server import dependencies
+
+        monkeypatch.setattr(dependencies, "get_access_token", lambda: None)
+        with pytest.raises(ToolError, match="context is missing"):
+            toolsearch._enforce_scope("send_message")
