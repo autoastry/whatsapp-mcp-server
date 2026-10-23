@@ -258,3 +258,31 @@ class TestDispatchAuthorization:
         monkeypatch.setattr(builtins, "__import__", broken_import)
         with pytest.raises(ToolError, match="policy is unavailable"):
             toolsearch._enforce_scope("send_message")
+
+
+
+def test_dispatch_denies_tool_without_scope_policy(monkeypatch, toolsearch):
+    """A forgotten policy must deny dispatch before caller context is consulted."""
+    import observability
+    from fastmcp.exceptions import ToolError
+
+    monkeypatch.setattr(observability, "TOOL_SCOPES", {"known_tool": "whatsapp:read"})
+    with pytest.raises(ToolError, match="Authorization policy missing"):
+        toolsearch._enforce_scope("unmapped_tool")
+
+
+def test_dispatch_denies_when_scope_policy_cannot_load(monkeypatch, toolsearch):
+    """Authorization configuration errors must not turn dispatch into allow."""
+    import builtins
+    from fastmcp.exceptions import ToolError
+
+    original_import = builtins.__import__
+
+    def blocked_import(name, *args, **kwargs):
+        if name == "observability":
+            raise ImportError("simulated unavailable policy")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked_import)
+    with pytest.raises(ToolError, match="Authorization policy is unavailable"):
+        toolsearch._enforce_scope("send_message")
