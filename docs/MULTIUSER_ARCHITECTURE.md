@@ -3,13 +3,13 @@
 Date: 2026-10-23
 Repository: https://github.com/autoastry/whatsapp-mcp-server
 Target branch: feature/multi-user-platform-audit
-Status: design proposal; no application code changed in Phase 1
+Status: design proposal; Phase 1 remains open; focused authorization hardening is now in the feature branch
 
 ## 1. Scope and evidence boundary
 
 This document defines the intended ownership and service boundaries before implementation. It is based on files inspected through GitHub, including whatsapp-bridge/main.go, whatsapp-mcp-server/server.py, observability.py, whatsapp.py, tools.py, toolsearch.py, scheduling.py, media.py, identity.py, CI, tests, and deployment configuration.
 
-Important limitation: the GitHub integration does not provide a shell or a complete local checkout. Baseline commands have not run, and the entire large Go file plus every tool/data path have not yet been exhaustively traced. The choices below are the target architecture; storage/migration implementation must not start until a local trace confirms all consumers and a backup/restore rehearsal is possible. This is not evidence that the current repository is multi-tenant.
+Evidence update (2026-10-23): the complete Go singleton lifecycle and registered-tool policy coverage have now been traced through GitHub source. A deny-by-default policy change and focused tests are committed on the feature branch; post-change CI must be reviewed. Existing CI run #2 passed the documented Python/Go baseline commands on the pre-hardening source revision. The GitHub integration still provides no local shell or Docker daemon, so no local command execution or safe-volume backup/restore rehearsal was possible. The choices below remain target architecture only; no storage migration or second account has been started.
 
 ## 2. Required security invariants
 
@@ -152,7 +152,7 @@ No acceptance criterion is satisfied merely because a test file exists. Report a
 
 ## 11. Sequencing and phase exit criteria
 
-- Phase 1 (this document): establish target ownership, lifecycle, storage boundary, bridge trust, migration and acceptance gates. Exit remains conditional on a complete local source/data-path trace and baseline test results.
+- Phase 1 (this document): establish target ownership, lifecycle, storage boundary, bridge trust, migration and acceptance gates. The Go singleton lifecycle has been source-traced and baseline CI passed on the pre-hardening revision, but Phase 1 exit remains blocked on post-hardening CI, full transcription/transient-state trace, cache-isolation proof or a decision to disable account-dependent caching, and a cold backup/restore rehearsal on a disposable copy.
 - Phase 2: implement the Go session manager behind interfaces and lifecycle fakes; do not migrate storage yet.
 - Phase 3: implement registry migrations and account-scoped storage with verified legacy adoption/rollback.
 - Phase 4: thread trusted identity/account context through Python tools, call_tool, media, scheduler, and bridge client.
@@ -170,3 +170,14 @@ No acceptance criterion is satisfied merely because a test file exists. Report a
 - confirmation of current production volume mounts and a verified backup/restore path.
 
 The current GitHub-only environment cannot produce those local execution results. Do not describe tests as passing or migration as safe until those gates are completed.
+
+
+## Phase 1 evidence update — 2026-10-23
+
+- Source trace now covers the single Go client/device-store construction, QR path, event handler, whatsmeow auto-reconnect behavior, absence of a logout API, fixed singleton REST handlers, and incomplete graceful shutdown. See `docs/MULTIUSER_PHASE1_TRACE.md`.
+- Mechanical source comparison found 96 registered regular tools plus `find_tool` and `call_tool`. The scope table has been extended and middleware/dispatcher checks now deny missing policy and missing caller context instead of allowing. Automated coverage tests were added but require the post-change CI run to complete.
+- Baseline CI run #2 succeeded for Python lint/tests, Go vet/staticcheck/tests/build, and Gitleaks on the pre-hardening revision. This is CI evidence, not a local run from the connector environment. Ruff format and gofmt checks are not currently part of authoritative CI.
+- Current compose volume mapping is confirmed from source: `wa-store` bridge read/write and MCP read-only; `wa-audit` stores audit, scheduling, transcription and short-link DB paths; `wa-media` stores decrypted media cache. These are configuration observations, not inspection of the live volume contents.
+- No live data was opened, copied, modified, migrated, or restored. Backup/restore remains unverified because the environment has no Docker daemon or production host access.
+
+**Phase 1 is not closed.** No account-scoped storage migration or multi-session runtime changes are authorized by this design addendum. The smallest first implementation after the gates close remains a Go session-manager interface and fake lifecycle tests, behind a compatibility-preserving seam, with a revert-only rollback and no live database changes.
