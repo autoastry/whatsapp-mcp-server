@@ -303,3 +303,19 @@ FastMCP's documented API exposes the current verified token through `get_access_
 
 Remaining before integration: latest commit CI; test the exact installed/locked FastMCP version with the actual `StaticTokenVerifier` setup; decide whether token client IDs map directly to principal IDs or require a separate provisioned mapping; and complete backup/restore and branch-divergence review. Phase 1 remains open.
 
+
+
+### Implementation checkpoint — explicit principal mapping seam
+
+The feature branch now includes `principal_mapping.py`, a pure resolver for a
+server-owned JSON mapping from verified `client_id` values to stable
+`principal_id` values. It rejects missing/invalid configuration, blank IDs,
+duplicate principal assignments, and unknown clients. It does not auto-create
+principals and does not fall back from an unknown client ID to itself.
+
+This is deliberately not wired into FastMCP request handling or the account
+registry yet. Before wiring it, the service must define how mapping configuration
+is supplied, provision matching registry principals, preserve audit `client_id`
+separately from authorization `principal_id`, and choose an explicit legacy
+single-token mapping. These tests validate only the mapping policy seam, not
+end-to-end token verification or account isolation.
