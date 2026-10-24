@@ -31,3 +31,22 @@ def require_authenticated_principal_id() -> str:
         raise AuthenticatedIdentityError("Authenticated principal unavailable")
 
     return principal_id.strip()
+
+
+def audit_client_id_or_unknown() -> str:
+    """Return verified token client_id for audit attribution, never a guessed owner.
+
+    Audit logging must remain best-effort even outside a request context. The
+    sentinel "unknown" is intentionally not a platform principal and must not be
+    used for authorization decisions.
+    """
+    try:
+        token = get_access_token()
+    except Exception:
+        return "unknown"
+    if token is None:
+        return "unknown"
+    client_id = getattr(token, "client_id", None)
+    if not isinstance(client_id, str) or not client_id.strip():
+        return "unknown"
+    return client_id.strip()
