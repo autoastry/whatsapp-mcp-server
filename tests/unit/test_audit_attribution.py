@@ -49,3 +49,26 @@ def test_call_tool_audit_uses_verified_client_id(monkeypatch, tmp_path):
     assert row["via"] == "call_tool"
     assert row["tool"] == "send_message"
     assert "private" not in payload
+
+
+def test_audit_paths_use_unknown_when_verified_identity_is_unavailable(monkeypatch, tmp_path):
+    def no_context():
+        raise RuntimeError("no request context")
+
+    monkeypatch.setattr(auth_identity, "get_access_token", no_context)
+    path = tmp_path / "unknown-audit.jsonl"
+    monkeypatch.setattr(observability, "AUDIT_LOG_PATH", path)
+    context = SimpleNamespace(
+        message=SimpleNamespace(name="send_message", arguments={"text": "private"}),
+    )
+
+    async def call_next(_context):
+        return "ok"
+
+    assert asyncio.run(
+        observability.ObservabilityMiddleware().on_call_tool(context, call_next)
+    ) == "ok"
+    toolsearch._audit("send_message", {"text": "private"}, "ok", 1.0)
+
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert [row["client_id"] for row in rows] == ["unknown", "unknown"]
