@@ -320,3 +320,19 @@ is supplied, provision matching registry principals, preserve audit `client_id`
 separately from authorization `principal_id`, and choose an explicit legacy
 single-token mapping. These tests validate only the mapping policy seam, not
 end-to-end token verification or account isolation.
+
+
+## 14. Explicit mapping enforced by the account-authorization seam (2026-10-24)
+
+Updated `account_authorization.py` so its helper no longer treats a verified
+token's `client_id` as a platform principal by default. The helper now requires
+a server-supplied `client_to_principal` mapping, resolves the verified client ID
+through that mapping, and only then asks the registry to authorize the requested
+account/action. Unmapped clients fail closed; a mapped but unprovisioned principal
+is denied by the registry. The mapping is a function argument for testability and
+must come from trusted server configuration, never from tool arguments.
+
+Regression tests cover mapped access, cross-account denial, absent identity,
+unmapped-client denial, and a mapping that points to an unprovisioned principal.
+This is still an internal helper only: no FastMCP middleware or existing WhatsApp
+tool invokes it yet, so it must not be represented as end-to-end isolation.
