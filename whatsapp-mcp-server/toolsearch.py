@@ -508,9 +508,14 @@ def _audit(name: str, args: Any, outcome: str, ms: float) -> None:
         from observability import AUDIT_LOG_PATH, AUDIT_MUTATING_TOOLS, _safe_args_hash
         if name not in AUDIT_MUTATING_TOOLS:
             return
+        try:
+            from auth_identity import audit_client_id_or_unknown
+            client_id = audit_client_id_or_unknown()
+        except Exception:
+            client_id = "unknown"
         row = {
             "ts": time.time(),
-            "client_id": "owner",
+            "client_id": client_id,
             "tool": name,
             "args_hash": _safe_args_hash(args),
             "outcome": outcome,
