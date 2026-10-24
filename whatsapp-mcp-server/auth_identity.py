@@ -1,8 +1,8 @@
-"""Resolve a platform principal from FastMCP's verified access-token context.
+"""Resolve the verified client identifier from FastMCP request auth context.
 
-The client_id is configured server-side in StaticTokenVerifier's token registry.
-Never accept a principal ID from tool arguments or request headers. This helper
-is a boundary for later integration and is not yet wired into account routing.
+A client_id identifies a configured token client, not necessarily a platform
+principal. Resolve it through an explicit server-owned mapping before using it
+for account authorization. Never accept identity from tool arguments or headers.
 """
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ class AuthenticatedIdentityError(PermissionError):
     """The current request has no usable trusted platform principal."""
 
 
-def require_authenticated_principal_id() -> str:
-    """Return the verified token's configured client_id, failing closed otherwise."""
+def require_verified_client_id() -> str:
+    """Return the verified token client_id; this is not a platform principal."""
     try:
         token = get_access_token()
     except Exception as exc:
@@ -26,11 +26,11 @@ def require_authenticated_principal_id() -> str:
     # StaticTokenVerifier maps a presented token to this server-configured
     # client_id. Do not use raw bearer token, tool arguments, or arbitrary claims
     # as an account ownership principal.
-    principal_id = getattr(token, "client_id", None)
-    if not isinstance(principal_id, str) or not principal_id.strip():
+    client_id = getattr(token, "client_id", None)
+    if not isinstance(client_id, str) or not client_id.strip():
         raise AuthenticatedIdentityError("Authenticated principal unavailable")
 
-    return principal_id.strip()
+    return client_id.strip()
 
 
 def audit_client_id_or_unknown() -> str:
