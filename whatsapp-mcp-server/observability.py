@@ -114,7 +114,12 @@ class ObservabilityMiddleware(Middleware):
     async def on_call_tool(self, context: MiddlewareContext, call_next):
         start = time.perf_counter()
         tool_name = getattr(context.message, "name", "unknown")
-        client_id = "owner"  # single-token deployment; will gain per-client when G11 lands
+        try:
+            from auth_identity import audit_client_id_or_unknown
+            client_id = audit_client_id_or_unknown()
+        except Exception:
+            # Audit must not break tool execution; unknown is safer than false attribution.
+            client_id = "unknown"
         outcome = "ok"
         try:
             result = await call_next(context)
