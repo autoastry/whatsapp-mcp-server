@@ -277,3 +277,19 @@ Use opaque random IDs, not phone numbers, JIDs, tokens, or user-controlled strin
 Before enforcement, the new registry is additive and can be disabled by configuration; legacy session and message DBs remain untouched. Keep the legacy singleton adapter as default until the feature flag is explicitly enabled. If any post-deployment issue occurs, disable multi-user mode and revert the isolated ownership/session commits; do not delete registry rows or restore over live databases as a rollback shortcut. Restore rehearsal and recorded hashes are prerequisites for any production rollout.
 
 **Decision:** do not begin runtime account-session implementation until the backup/restore rehearsal is evidenced and the branch/main divergence is reviewed. The next code PR should be limited to the isolated ownership registry + pure authorization policy + tests, without connecting it to message tools or the Go session lifecycle.
+
+## 12. Isolated ownership registry implementation checkpoint (2026-10-24)
+
+The feature branch now contains an initial, deliberately unintegrated Python control-plane registry in `whatsapp-mcp-server/account_registry.py`. It requires an explicit SQLite path, creates a separate versioned registry schema for principals, account lifecycle status, and ownership grants, and does not inspect or adopt the legacy WhatsApp stores. The first offline policy tests are in `tests/unit/test_account_registry.py`.
+
+The policy currently denies by default on missing identity/account/action, disabled principals, absent or revoked grants, insufficient role, and incompatible account lifecycle state. Account creation atomically creates the account and its owner grant. Sharing grants are limited to reader/operator roles and require the acting principal to have manage permission; revocation also requires manage permission and cannot revoke the owner grant.
+
+CI run #28 (GitHub Actions run 40071720977) passed on commit `fcd809b0e4358293f624a05622efd1b7747982f3`: Python lint and unit tests, Go vet/staticcheck/tests/build, and Gitleaks. This is CI evidence only; no local shell was used. The registry remains unconnected to FastMCP request identity, MCP tools, media, scheduler, or the Go bridge. It is not yet a production authorization boundary.
+
+Remaining checks before integration:
+- expand policy tests for role/state matrices, invalid inputs, persistence/reopen, and concurrent access;
+- verify exact trusted principal extraction from the pinned FastMCP auth context and add a focused test;
+- decide and document transaction/locking semantics for concurrent grant revocation;
+- complete disposable cold backup/restore rehearsal and review branch/main divergence;
+- keep Phase 1 open until all existing gates are evidenced.
+
