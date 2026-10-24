@@ -11,6 +11,15 @@ from collections.abc import Mapping
 from typing import Any
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise PrincipalMappingError("Duplicate client ID in mapping JSON")
+        result[key] = value
+    return result
+
+
 class PrincipalMappingError(ValueError):
     """Raised when principal mapping configuration is missing or ambiguous."""
 
@@ -20,14 +29,13 @@ def parse_principal_mapping(raw: str) -> dict[str, str]:
     if not isinstance(raw, str) or not raw.strip():
         raise PrincipalMappingError("Principal mapping configuration is required")
     try:
-        value: Any = json.loads(raw)
+        value: Any = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
     except (json.JSONDecodeError, TypeError) as exc:
         raise PrincipalMappingError("Principal mapping must be valid JSON") from exc
     if not isinstance(value, dict) or not value:
         raise PrincipalMappingError("Principal mapping must be a non-empty JSON object")
 
     mapping: dict[str, str] = {}
-    principals: set[str] = set()
     for client_id, principal_id in value.items():
         if not isinstance(client_id, str) or not client_id.strip():
             raise PrincipalMappingError("Client IDs must be non-empty strings")
@@ -37,10 +45,7 @@ def parse_principal_mapping(raw: str) -> dict[str, str]:
         principal_id = principal_id.strip()
         if client_id in mapping:
             raise PrincipalMappingError("Duplicate client ID")
-        if principal_id in principals:
-            raise PrincipalMappingError("Each client must map to a unique principal")
         mapping[client_id] = principal_id
-        principals.add(principal_id)
     return mapping
 
 
