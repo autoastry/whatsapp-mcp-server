@@ -20,7 +20,6 @@ import os
 
 from fastmcp import FastMCP
 from fastmcp.server.auth import StaticTokenVerifier
-from fastmcp.server.middleware.caching import ResponseCachingMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -239,24 +238,11 @@ from observability import AuthzMiddleware
 mcp.add_middleware(AuthzMiddleware())
 mcp.add_middleware(ObservabilityMiddleware())
 
-mcp.add_middleware(ResponseCachingMiddleware(
-    call_tool_settings={
-        "ttl": 30,
-        "included_tools": [
-            "list_chats",
-            "search_contacts",
-            "get_chat",
-            "get_direct_chat_by_contact",
-            "get_contact_chats",
-            "get_last_interaction",
-            "get_message_context",
-            "list_messages",
-            "bridge_health",
-            "get_profile_picture",
-        ],
-    },
-    list_tools_settings={"ttl": 300},  # tool registry changes only on redeploy
-))
+# Response caching is intentionally disabled. The current deployment has one shared
+# WhatsApp identity, and the locked FastMCP cache key has not been proven to include
+# authenticated principal + authorized account identity. Re-enable only after
+# account-aware cache keys and cross-principal isolation tests exist.
+
 
 
 @mcp.custom_route("/health", methods=["GET"])

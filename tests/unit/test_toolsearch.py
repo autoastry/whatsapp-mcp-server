@@ -201,3 +201,88 @@ class TestMetaToolsAreNotRecursive:
     def test_meta_names_are_excluded_from_the_library(self, library):
         for name in library._META_NAMES:
             assert name not in library._LIBRARY
+
+
+class TestDispatchAuthorization:
+    """The dynamic dispatcher must fail closed independently of outer middleware."""
+
+    def test_unknown_tool_is_denied(self, toolsearch):
+        pytest.importorskip("fastmcp")
+        from fastmcp.exceptions import ToolError
+
+        with pytest.raises(ToolError, match="policy missing"):
+            toolsearch._enforce_scope("definitely_not_a_registered_tool")
+
+    def test_registered_tool_without_policy_is_denied(self, toolsearch, monkeypatch):
+        pytest.importorskip("fastmcp")
+        from fastmcp.exceptions import ToolError
+        import observability
+
+        monkeypatch.delitem(observability.TOOL_SCOPES, "send_message")
+        with pytest.raises(ToolError, match="policy missing"):
+            toolsearch._enforce_scope("send_message")
+
+    def test_valid_existing_scope_is_preserved(self, toolsearch, monkeypatch):
+        pytest.importorskip("fastmcp")
+        from types import SimpleNamespace
+        from fastmcp.server import dependencies
+
+        monkeypatch.setattr(
+            dependencies, "get_access_token",
+            lambda: SimpleNamespace(scopes=["whatsapp:send"]),
+        )
+        assert toolsearch._enforce_scope("send_message") is None
+
+    def test_missing_authenticated_context_is_denied(self, toolsearch, monkeypatch):
+        pytest.importorskip("fastmcp")
+        from fastmcp.exceptions import ToolError
+        from fastmcp.server import dependencies
+
+        monkeypatch.setattr(dependencies, "get_access_token", lambda: None)
+        with pytest.raises(ToolError, match="context is missing"):
+            toolsearch._enforce_scope("send_message")
+
+
+    def test_policy_import_failure_is_denied(self, toolsearch, monkeypatch):
+        pytest.importorskip("fastmcp")
+        import builtins
+        from fastmcp.exceptions import ToolError
+
+        real_import = builtins.__import__
+
+        def broken_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "observability" and "TOOL_SCOPES" in fromlist:
+                raise ImportError("simulated missing policy module")
+            return real_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", broken_import)
+        with pytest.raises(ToolError, match="policy is unavailable"):
+            toolsearch._enforce_scope("send_message")
+
+
+
+def test_dispatch_denies_tool_without_scope_policy(monkeypatch, toolsearch):
+    """A forgotten policy must deny dispatch before caller context is consulted."""
+    import observability
+    from fastmcp.exceptions import ToolError
+
+    monkeypatch.setattr(observability, "TOOL_SCOPES", {"known_tool": "whatsapp:read"})
+    with pytest.raises(ToolError, match="Authorization policy missing"):
+        toolsearch._enforce_scope("unmapped_tool")
+
+
+def test_dispatch_denies_when_scope_policy_cannot_load(monkeypatch, toolsearch):
+    """Authorization configuration errors must not turn dispatch into allow."""
+    import builtins
+    from fastmcp.exceptions import ToolError
+
+    original_import = builtins.__import__
+
+    def blocked_import(name, *args, **kwargs):
+        if name == "observability":
+            raise ImportError("simulated unavailable policy")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked_import)
+    with pytest.raises(ToolError, match="Authorization policy is unavailable"):
+        toolsearch._enforce_scope("send_message")
