@@ -33,3 +33,26 @@ def test_access_token_context_failure_fails_closed(monkeypatch):
     monkeypatch.setattr(auth_identity, "get_access_token", fail)
     with pytest.raises(AuthenticatedIdentityError, match="Authenticated principal unavailable"):
         require_authenticated_principal_id()
+
+
+def test_audit_client_id_uses_verified_client_id_or_unknown(monkeypatch):
+    from auth_identity import audit_client_id_or_unknown
+
+    monkeypatch.setattr(
+        auth_identity, "get_access_token",
+        lambda: SimpleNamespace(client_id="client-b"),
+    )
+    assert audit_client_id_or_unknown() == "client-b"
+
+    monkeypatch.setattr(auth_identity, "get_access_token", lambda: None)
+    assert audit_client_id_or_unknown() == "unknown"
+
+
+def test_audit_client_id_does_not_invent_owner(monkeypatch):
+    from auth_identity import audit_client_id_or_unknown
+
+    monkeypatch.setattr(
+        auth_identity, "get_access_token",
+        lambda: SimpleNamespace(scopes=["whatsapp:full"]),
+    )
+    assert audit_client_id_or_unknown() == "unknown"
