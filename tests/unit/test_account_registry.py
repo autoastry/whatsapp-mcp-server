@@ -59,3 +59,49 @@ def test_disabled_principal_and_revoked_account_are_denied(registry):
 def test_unknown_principal_cannot_create_account(registry):
     with pytest.raises(AuthorizationDenied):
         registry.create_account("missing", "not-created")
+
+
+@pytest.mark.parametrize(
+    "status,allowed,denied",
+    [
+        ("pending_pairing", ("manage",), ("read", "send")),
+        ("active", ("read", "send", "manage"), ()),
+        ("disconnected", ("read", "manage"), ("send",)),
+        ("revoked", (), ("read", "send", "manage")),
+        ("error", ("manage",), ("read", "send")),
+    ],
+)
+def test_account_lifecycle_state_gates_actions(registry, status, allowed, denied):
+    registry.create_principal("alice")
+    account = registry.create_account("alice", f"account-{status}", status)
+    for action in allowed:
+        registry.require_account_access("alice", account, action)
+    for action in denied:
+        with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+            registry.require_account_access("alice", account, action)
+
+
+def test_registry_grants_survive_close_and_reopen(tmp_path):
+    db_path = tmp_path / "persistent-platform.db"
+    first = AccountRegistry(db_path)
+    first.create_principal("alice")
+    first.create_principal("bob")
+    account = first.create_account("alice", "account-persistent", "active")
+    first.grant_access("alice", "bob", account, "operator")
+    first.close()
+
+    reopened = AccountRegistry(db_path)
+    try:
+        reopened.require_account_access("alice", account, "manage")
+        reopened.require_account_access("bob", account, "read")
+        reopened.require_account_access("bob", account, "send")
+        with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+            reopened.require_account_access("bob", account, "manage")
+    finally:
+        reopened.close()
+
+
+def test_unknown_action_is_denied(registry):
+    account = pair(registry)
+    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+        registry.require_account_access("alice", account, "admin")
