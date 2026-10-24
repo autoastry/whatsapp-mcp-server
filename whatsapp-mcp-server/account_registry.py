@@ -164,13 +164,23 @@ class AccountRegistry:
         return account
 
     def grant_access(
-        self, principal_id: str, account_id: str, role: str = "reader"
+        self, actor_principal_id: str, principal_id: str, account_id: str,
+        role: str = "reader",
     ) -> None:
+        """Grant reader/operator access; only the active account owner may do so."""
+        actor = self._required_id(actor_principal_id, "actor_principal_id")
         principal = self._required_id(principal_id, "principal_id")
         account = self._required_id(account_id, "account_id")
-        if role not in OWNERSHIP_ROLES:
-            raise ValueError("Invalid ownership role")
+        if role not in {"operator", "reader"}:
+            raise ValueError("Only operator or reader grants are supported")
+        self.require_account_access(actor, account, "manage")
         with self._lock:
+            target = self._db.execute(
+                "SELECT status FROM platform_principals WHERE principal_id = ?",
+                (principal,),
+            ).fetchone()
+            if target is None or target["status"] != "active":
+                raise AuthorizationDenied("Account access denied")
             self._db.execute(
                 """INSERT INTO account_ownership(principal_id, account_id, role, status)
                    VALUES (?, ?, ?, 'active')
@@ -179,15 +189,19 @@ class AccountRegistry:
                 (principal, account, role),
             )
 
-    def revoke_access(self, principal_id: str, account_id: str) -> None:
+    def revoke_access(
+        self, actor_principal_id: str, principal_id: str, account_id: str
+    ) -> None:
+        """Revoke a grant only when the actor is authorized to manage the account."""
+        actor = self._required_id(actor_principal_id, "actor_principal_id")
+        principal = self._required_id(principal_id, "principal_id")
+        account = self._required_id(account_id, "account_id")
+        self.require_account_access(actor, account, "manage")
         with self._lock:
             cursor = self._db.execute(
                 """UPDATE account_ownership SET status = 'revoked'
-                   WHERE principal_id = ? AND account_id = ?""",
-                (
-                    self._required_id(principal_id, "principal_id"),
-                    self._required_id(account_id, "account_id"),
-                ),
+                   WHERE principal_id = ? AND account_id = ? AND role != 'owner'""",
+                (principal, account),
             )
             if cursor.rowcount != 1:
                 raise AuthorizationDenied("Account access denied")
