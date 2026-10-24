@@ -293,3 +293,13 @@ Remaining checks before integration:
 - complete disposable cold backup/restore rehearsal and review branch/main divergence;
 - keep Phase 1 open until all existing gates are evidenced.
 
+## 13. Trusted principal extraction checkpoint (2026-10-24)
+
+Added `whatsapp-mcp-server/auth_identity.py` with `require_authenticated_principal_id()`. It reads the current FastMCP verified access-token context via `get_access_token()` and accepts only a non-empty `client_id` configured by the server's token verifier. Missing context, exceptions, blank IDs, or tokens without `client_id` fail closed. It does not fall back to caller arguments, headers, raw bearer tokens, or arbitrary claims. Unit tests in `tests/unit/test_auth_identity.py` cover successful resolution and fail-closed cases.
+
+This helper is intentionally not wired into MCP middleware, tools, or account routing yet. Existing configured `client_id` values (including the legacy `owner`) are only token-client identifiers today; they become platform principals only after an explicit provisioning/mapping policy is agreed and tested. In particular, the legacy fallback is not proof of end-user identity.
+
+FastMCP's documented API exposes the current verified token through `get_access_token()`, including `client_id`, `scopes`, and `claims`; identity resolution uses the server-configured client ID rather than arbitrary claims. Reference: <https://gofastmcp.com/servers/authorization>.
+
+Remaining before integration: latest commit CI; test the exact installed/locked FastMCP version with the actual `StaticTokenVerifier` setup; decide whether token client IDs map directly to principal IDs or require a separate provisioned mapping; and complete backup/restore and branch-divergence review. Phase 1 remains open.
+
