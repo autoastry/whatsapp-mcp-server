@@ -310,7 +310,8 @@ Remaining before integration: latest commit CI; test the exact installed/locked 
 The feature branch now includes `principal_mapping.py`, a pure resolver for a
 server-owned JSON mapping from verified `client_id` values to stable
 `principal_id` values. It rejects missing/invalid configuration, blank IDs,
-duplicate principal assignments, and unknown clients. It does not auto-create
+duplicate JSON client keys, and unknown clients. Multiple distinct client IDs may
+map to the same stable principal, allowing one user to use multiple client apps. It does not auto-create
 principals and does not fall back from an unknown client ID to itself.
 
 This is deliberately not wired into FastMCP request handling or the account
