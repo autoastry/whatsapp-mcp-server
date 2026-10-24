@@ -1,8 +1,8 @@
-"""Exercise verified token context through the actual Streamable HTTP ASGI transport.
+"""Exercise verified token context through the actual Streamable HTTP transport.
 
 This boots the app in a subprocess with temporary database paths and no WhatsApp
 bridge. A probe tool reads FastMCP's request-scoped access token; the assertion
-therefore covers transport authentication and request-context propagation rather
+covers HTTP transport authentication and request-context propagation rather
 than only mocking get_access_token().
 """
 from __future__ import annotations
@@ -21,7 +21,10 @@ SERVER_DIR = Path(__file__).resolve().parents[2] / "whatsapp-mcp-server"
 
 PROBE = r"""
 import asyncio
+import socket
+
 import server
+import uvicorn
 from fastmcp import Client
 from fastmcp.server.dependencies import get_access_token
 from observability import TOOL_SCOPES
@@ -36,9 +39,34 @@ def auth_context_probe() -> str:
     return token.client_id + "|" + ",".join(token.scopes)
 
 async def main():
-    async with Client(server.asgi_app, auth="test-token") as client:
-        result = await client.call_tool("auth_context_probe", {})
-        print(result.content[0].text)
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    config = uvicorn.Config(
+        server.asgi_app,
+        host="127.0.0.1",
+        port=port,
+        log_level="error",
+        lifespan="on",
+    )
+    http_server = uvicorn.Server(config)
+    server_task = asyncio.create_task(http_server.serve())
+    try:
+        for _ in range(500):
+            if http_server.started:
+                break
+            if server_task.done():
+                await server_task
+            await asyncio.sleep(0.02)
+        assert http_server.started, "Uvicorn did not start"
+
+        async with Client(f"http://127.0.0.1:{port}/mcp", auth="test-token") as client:
+            result = await client.call_tool("auth_context_probe", {})
+            print(result.content[0].text)
+    finally:
+        http_server.should_exit = True
+        await server_task
 
 asyncio.run(main())
 """
