@@ -173,8 +173,8 @@ class AccountRegistry:
         account = self._required_id(account_id, "account_id")
         if role not in {"operator", "reader"}:
             raise ValueError("Only operator or reader grants are supported")
-        self.require_account_access(actor, account, "manage")
         with self._lock:
+            self.require_account_access(actor, account, "manage")
             target = self._db.execute(
                 "SELECT status FROM platform_principals WHERE principal_id = ?",
                 (principal,),
@@ -196,8 +196,8 @@ class AccountRegistry:
         actor = self._required_id(actor_principal_id, "actor_principal_id")
         principal = self._required_id(principal_id, "principal_id")
         account = self._required_id(account_id, "account_id")
-        self.require_account_access(actor, account, "manage")
         with self._lock:
+            self.require_account_access(actor, account, "manage")
             cursor = self._db.execute(
                 """UPDATE account_ownership SET status = 'revoked'
                    WHERE principal_id = ? AND account_id = ? AND role != 'owner'""",
