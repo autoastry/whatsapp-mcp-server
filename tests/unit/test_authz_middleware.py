@@ -97,6 +97,11 @@ def test_every_registered_mcp_tool_has_an_explicit_scope_policy():
     project_root = Path(__file__).resolve().parents[2] / "whatsapp-mcp-server"
     registered = set()
     for source_path in project_root.rglob("*.py"):
+        # uv creates the dependency environment inside the project directory in
+        # CI. Scan first-party source only; dependency tools are not our registry.
+        relative_parts = source_path.relative_to(project_root).parts
+        if any(part in {".venv", "site-packages", "__pycache__"} for part in relative_parts):
+            continue
         tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
         for node in ast.walk(tree):
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
