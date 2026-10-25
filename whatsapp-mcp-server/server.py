@@ -1,11 +1,7 @@
 """Authenticated HTTP entrypoint for the WhatsApp MCP server.
 
-Serves the WhatsApp tools over Streamable HTTP at /mcp, gated by a single
-owner bearer token. Only ONE principal exists: the owner. Every request must
-carry `Authorization: Bearer <WHATSAPP_MCP_TOKEN>`; anything else -> 401.
-
-We use FastMCP v2's built-in StaticTokenVerifier (no custom verifier needed)
-keyed on exactly one token read from the environment.
+Serves the WhatsApp tools over Streamable HTTP at /mcp. Every request must
+carry a configured bearer token; anything else is rejected by FastMCP.
 
 Run (production, behind nginx on loopback):
     gunicorn server:asgi_app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:9000 -w 2
@@ -37,53 +33,79 @@ log = logging.getLogger("whatsapp_mcp")
 
 import json as _json
 
-# N7 + G11: multi-token registry with per-token scopes.
-# The classic path (single WHATSAPP_MCP_TOKEN with scopes:["whatsapp:full"])
-# still works. To use per-tool scopes, set WHATSAPP_MCP_TOKENS_JSON with a
-# JSON array like:
-#   [{"token":"abc...", "client_id":"myphone", "scopes":["whatsapp:read","whatsapp:send"]},
-#    {"token":"def...", "client_id":"biscript", "scopes":["whatsapp:read"]}]
-# Scopes recognized: whatsapp:read, whatsapp:send, whatsapp:admin, whatsapp:full
-# (whatsapp:full = superset of all three).
+# Per-token scope registry. Client IDs are credential labels, not platform
+# principals; account ownership must be resolved separately and explicitly.
+_ALLOWED_SCOPES = {"whatsapp:read", "whatsapp:send", "whatsapp:admin", "whatsapp:full"}
 _TOKENS: dict[str, dict] = {}
 
-_TOKENS_JSON = os.environ.get("WHATSAPP_MCP_TOKENS_JSON", "").strip()
-if _TOKENS_JSON:
-    try:
-        entries = _json.loads(_TOKENS_JSON)
-        for e in entries:
-            tok = str(e.get("token", "")).strip()
-            if not tok:
-                continue
-            _TOKENS[tok] = {
-                "client_id": str(e.get("client_id", "unknown")),
-                "scopes":    list(e.get("scopes", ["whatsapp:read"])),
-            }
-    except (ValueError, TypeError) as exc:
-        raise SystemExit(f"WHATSAPP_MCP_TOKENS_JSON is invalid JSON: {exc}") from exc
 
-# Legacy single-token fallback
-_LEGACY = os.environ.get("WHATSAPP_MCP_TOKEN", "").strip()
-if _LEGACY and _LEGACY not in _TOKENS:
-    _TOKENS[_LEGACY] = {"client_id": "owner", "scopes": ["whatsapp:full"]}
+def _load_token_registry(tokens_json: str, legacy_token: str) -> dict[str, dict]:
+    """Parse credentials strictly so malformed config never silently weakens auth."""
+    registry: dict[str, dict] = {}
+    client_ids: set[str] = set()
 
-if not _TOKENS:
-    raise SystemExit(
-        "No auth tokens configured. Set WHATSAPP_MCP_TOKEN or "
-        "WHATSAPP_MCP_TOKENS_JSON. Refusing to serve unauthenticated."
-    )
+    if tokens_json.strip():
+        try:
+            entries = _json.loads(tokens_json)
+        except (ValueError, TypeError) as exc:
+            raise SystemExit(f"WHATSAPP_MCP_TOKENS_JSON is invalid JSON: {exc}") from exc
+        if not isinstance(entries, list) or not entries:
+            raise SystemExit("WHATSAPP_MCP_TOKENS_JSON must be a non-empty JSON array")
 
-# FastMCP's StaticTokenVerifier requires a global required_scopes; we cannot
-# enforce per-tool scope there. Instead we grant every token the umbrella
-# scope "whatsapp:authenticated" so requests pass the transport-level check,
-# then let the ObservabilityMiddleware (or a new AuthzMiddleware) reject
-# per-tool at dispatch time based on the token's declared scopes.
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                raise SystemExit(f"Token entry {index} must be a JSON object")
+            token = entry.get("token")
+            client_id = entry.get("client_id")
+            scopes = entry.get("scopes", ["whatsapp:read"])
+            if not isinstance(token, str) or not token.strip():
+                raise SystemExit(f"Token entry {index} must have a non-empty string token")
+            if not isinstance(client_id, str) or not client_id.strip():
+                raise SystemExit(f"Token entry {index} must have a non-empty string client_id")
+            token = token.strip()
+            client_id = client_id.strip()
+            if token in registry:
+                raise SystemExit(f"Duplicate token in WHATSAPP_MCP_TOKENS_JSON at entry {index}")
+            if client_id in client_ids:
+                raise SystemExit(f"Duplicate client_id in WHATSAPP_MCP_TOKENS_JSON: {client_id!r}")
+            if not isinstance(scopes, list) or not scopes:
+                raise SystemExit(f"Token entry {index} scopes must be a non-empty array")
+            if any(not isinstance(scope, str) or scope not in _ALLOWED_SCOPES for scope in scopes):
+                raise SystemExit(f"Token entry {index} contains an unsupported scope")
+            if len(set(scopes)) != len(scopes):
+                raise SystemExit(f"Token entry {index} contains duplicate scopes")
+
+            registry[token] = {"client_id": client_id, "scopes": list(scopes)}
+            client_ids.add(client_id)
+
+    legacy = legacy_token.strip()
+    if legacy:
+        if legacy in registry:
+            raise SystemExit("WHATSAPP_MCP_TOKEN duplicates a token in WHATSAPP_MCP_TOKENS_JSON")
+        if "owner" in client_ids:
+            raise SystemExit("Legacy WHATSAPP_MCP_TOKEN client_id 'owner' conflicts with configured client_id")
+        registry[legacy] = {"client_id": "owner", "scopes": ["whatsapp:full"]}
+
+    if not registry:
+        raise SystemExit(
+            "No auth tokens configured. Set WHATSAPP_MCP_TOKEN or "
+            "WHATSAPP_MCP_TOKENS_JSON. Refusing to serve unauthenticated."
+        )
+    return registry
+
+
+_TOKENS = _load_token_registry(
+    os.environ.get("WHATSAPP_MCP_TOKENS_JSON", ""),
+    os.environ.get("WHATSAPP_MCP_TOKEN", ""),
+)
+
+# FastMCP's StaticTokenVerifier requires a global required_scopes; grant every
+# valid token the umbrella scope and enforce tool-specific scopes at dispatch.
 _verifier_tokens: dict[str, dict] = {}
 for _tok, _meta in _TOKENS.items():
     _verifier_tokens[_tok] = {
         "client_id": _meta["client_id"],
-        # Verifier scope check: "authenticated" required; per-tool logic below.
-        "scopes":    ["whatsapp:authenticated"] + _meta["scopes"],
+        "scopes": ["whatsapp:authenticated"] + _meta["scopes"],
     }
 
 auth = StaticTokenVerifier(
@@ -107,8 +129,8 @@ mcp = FastMCP(
         "be recovered. Do NOT infer who sent those from surrounding context; say "
         "they are unattributable instead.\n"
         "REPLYING - PREFER QUOTED REPLIES BY DEFAULT: whenever you are responding "
-        "to a specific message - the user says \"reply\", \"رد\", \"رد عليه\", "
-        "\"answer him\", \"قوله\", or is reacting to / fact-checking / commenting on "
+        "to a specific message - the user says \\"reply\\", \\"رد\\", \\"رد عليه\\", "
+        "\\"answer him\\", \\"قوله\\", or is reacting to / fact-checking / commenting on "
         "a particular message - call reply_to_message(message_id, text). That posts "
         "a QUOTED reply showing the original. This is the DEFAULT: if there is an "
         "identifiable message you are responding to, quote it. Use a plain "
@@ -118,6 +140,27 @@ mcp = FastMCP(
     auth=auth,
 )
 
+register(mcp)
+register_prompts(mcp)
+register_scheduling(mcp)
+try:
+    register_resources(mcp)
+except Exception:
+    log.exception("resources registration failed")
+
+# Minimal toolset mode. Tool definitions are injected into the model's context on
+# EVERY request, so the full 96-tool set is a ~20k-token fixed tax whether or not
+# WhatsApp is used. Minimal mode prunes to core tools and keeps the rest reachable
+# through find_tool + call_tool.
+_TOOLSET = os.environ.get("WHATSAPP_MCP_TOOLSET", "minimal").strip().lower()
+_CORE_TOOLS = {
+    # read / search
+    "search_contacts", "search_all_messages", "list_messages", "list_chats",
+    "get_chat", "get_message_context", "get_direct_chat_by_contact", "get_media_info",
+    # send
+    "send_message", "reply_to_message", "send_file", "send_audio_message",
+    "send_view_once_media", "forward_message",
+    # media + transcription
 register(mcp)
 register_prompts(mcp)
 register_scheduling(mcp)
