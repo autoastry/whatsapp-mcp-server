@@ -627,10 +627,12 @@ def register(mcp) -> None:
         except Exception as e:
             outcome = "error"
             _audit(name, args, outcome, (time.perf_counter() - start) * 1000)
-            # Surface a helpful, structured error instead of a bare 500 so the
-            # model can correct its arguments and retry.
+            # Do not return exception text: downstream tools can include tokens,
+            # message content, local paths, or service URLs in exception details.
+            # Keep logs similarly low-detail to avoid leaking those values.
+            log.warning("call_tool dispatch failed for %s (%s)", name, type(e).__name__)
             return {
-                "error": f"{type(e).__name__}: {e}",
+                "error": "Tool execution failed; check arguments and retry.",
                 "tool": name,
                 "expected_params": _sig(getattr(tool, "parameters", None)),
                 "hint": "check arguments against expected_params, then retry",
