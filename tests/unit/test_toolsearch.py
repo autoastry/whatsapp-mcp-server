@@ -286,3 +286,44 @@ def test_dispatch_denies_when_scope_policy_cannot_load(monkeypatch, toolsearch):
     monkeypatch.setattr(builtins, "__import__", blocked_import)
     with pytest.raises(ToolError, match="Authorization policy is unavailable"):
         toolsearch._enforce_scope("send_message")
+
+
+def test_dispatch_error_does_not_expose_exception_details(toolsearch, monkeypatch, caplog):
+    """Tool exceptions can contain credentials or message content; never return them."""
+    import asyncio
+    from types import SimpleNamespace
+
+    class FailingTool:
+        parameters = {
+            "type": "object",
+            "properties": {"chat_jid": {"type": "string"}},
+            "required": ["chat_jid"],
+        }
+
+        async def run(self, args):
+            raise RuntimeError("authorization=secret-token and private message body")
+
+    registered = {}
+
+    class FakeMCP:
+        def tool(self, **kwargs):
+            def decorator(fn):
+                registered[kwargs["name"]] = fn
+                return fn
+            return decorator
+
+    monkeypatch.setattr(toolsearch, "_LIBRARY", {"send_message": FailingTool()})
+    monkeypatch.setattr(toolsearch, "_enforce_scope", lambda name: None)
+    monkeypatch.setattr(toolsearch, "_audit", lambda *args: None)
+
+    toolsearch.register(FakeMCP())
+    result = asyncio.run(
+        registered["call_tool"]("send_message", {"chat_jid": "chat@example"})
+    )
+
+    assert result["error"] == "Tool execution failed; check arguments and retry."
+    assert "expected_params" in result
+    assert "secret-token" not in str(result)
+    assert "private message body" not in str(result)
+    assert "secret-token" not in caplog.text
+    assert "private message body" not in caplog.text
