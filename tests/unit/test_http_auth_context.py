@@ -1,12 +1,12 @@
-"""Exercise verified token context through the actual Streamable HTTP transport.
+"""Exercise verified token context and scope enforcement over Streamable HTTP.
 
-This boots the app in a subprocess with temporary database paths and no WhatsApp
-bridge. A probe tool reads FastMCP's request-scoped access token; the assertion
-covers HTTP transport authentication and request-context propagation rather
-than only mocking get_access_token().
+The app runs in a subprocess with temporary database paths and no WhatsApp
+bridge. Test-only tools expose the verified request token and verify that a
+read-only credential cannot call a send-scoped tool.
 """
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import subprocess
@@ -29,14 +29,18 @@ from fastmcp import Client
 from fastmcp.server.dependencies import get_access_token
 from observability import TOOL_SCOPES
 
-# A test-only tool makes the request's verified auth context observable. It
-# returns no WhatsApp data and does not access the bridge or shared databases.
+# These tools are test-only and never access WhatsApp data or the bridge.
 TOOL_SCOPES["auth_context_probe"] = "whatsapp:read"
+TOOL_SCOPES["authz_scope_probe"] = "whatsapp:send"
 
 @server.mcp.tool(name="auth_context_probe")
 def auth_context_probe() -> str:
     token = get_access_token()
     return token.client_id + "|" + ",".join(token.scopes)
+
+@server.mcp.tool(name="authz_scope_probe")
+def authz_scope_probe() -> str:
+    return "SHOULD_NOT_EXECUTE"
 
 async def main():
     with socket.socket() as sock:
@@ -61,9 +65,12 @@ async def main():
             await asyncio.sleep(0.02)
         assert http_server.started, "Uvicorn did not start"
 
-        async with Client(f"http://127.0.0.1:{port}/mcp", auth="test-token") as client:
-            result = await client.call_tool("auth_context_probe", {})
-            print(result.content[0].text)
+        async with Client(f"http://127.0.0.1:{port}/mcp", auth="read-only-secret") as client:
+            context_result = await client.call_tool("auth_context_probe", {})
+            print("CONTEXT=" + context_result.content[0].text)
+            denied_result = await client.call_tool("authz_scope_probe", {})
+            denied_text = denied_result.content[0].text if denied_result.content else ""
+            print("DENIED=" + str(denied_result.isError) + "|" + denied_text)
     finally:
         http_server.should_exit = True
         await server_task
@@ -72,19 +79,29 @@ asyncio.run(main())
 """
 
 
-def test_http_transport_propagates_verified_token_context(tmp_path):
+def test_http_transport_propagates_verified_token_and_enforces_scopes(tmp_path):
     for name in ("messages.db", "whatsapp.db"):
         sqlite3.connect(tmp_path / name).close()
 
     env = {
         **os.environ,
-        "WHATSAPP_MCP_TOKEN": "test-token",
+        "WHATSAPP_MCP_TOKENS_JSON": json.dumps(
+            [
+                {
+                    "token": "read-only-secret",
+                    "client_id": "reader-app",
+                    "scopes": ["whatsapp:read"],
+                }
+            ]
+        ),
+        "WHATSAPP_MCP_TOKEN": "",
         "WHATSAPP_MCP_TOOLSET": "minimal",
         "MESSAGES_DB_PATH": str(tmp_path / "messages.db"),
         "WHATSMEOW_DB_PATH": str(tmp_path / "whatsapp.db"),
         "WHATSAPP_MCP_SHORT_DB": str(tmp_path / "short.db"),
         "WHATSAPP_MCP_SCHEDULE_DB": str(tmp_path / "schedule.db"),
         "WHATSAPP_API_BASE_URL": "http://127.0.0.1:9/api",
+        "WHATSAPP_MCP_AUDIT_LOG": str(tmp_path / "audit.jsonl"),
     }
     proc = subprocess.run(
         [sys.executable, "-c", PROBE],
@@ -96,8 +113,15 @@ def test_http_transport_propagates_verified_token_context(tmp_path):
     )
 
     assert proc.returncode == 0, proc.stderr[-4000:]
-    output = proc.stdout.strip().splitlines()[-1]
-    assert output.startswith("owner|"), output
-    scopes = output.partition("|")[2].split(",")
-    assert "whatsapp:authenticated" in scopes, output
-    assert "whatsapp:full" in scopes, output
+    lines = proc.stdout.strip().splitlines()
+    context = next(line.partition("CONTEXT=")[2] for line in lines if "CONTEXT=" in line)
+    assert context.startswith("reader-app|"), context
+    scopes = context.partition("|")[2].split(",")
+    assert "whatsapp:authenticated" in scopes, context
+    assert "whatsapp:read" in scopes, context
+    assert "whatsapp:send" not in scopes, context
+
+    denied = next(line.partition("DENIED=")[2] for line in lines if "DENIED=" in line)
+    assert denied.startswith("True|"), denied
+    assert "Insufficient scope" in denied, denied
+    assert "SHOULD_NOT_EXECUTE" not in denied, denied
