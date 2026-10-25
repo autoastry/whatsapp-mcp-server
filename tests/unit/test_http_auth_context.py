@@ -75,6 +75,17 @@ async def main():
                 print("DENIED=True|" + str(exc))
             else:
                 print("DENIED=False|scope-restricted tool unexpectedly executed")
+
+            # The meta-tool dispatches internally and must independently enforce
+            # the target tool's scope, not just call_tool's own outer scope.
+            try:
+                await client.call_tool(
+                    "call_tool", {"name": "send_message", "arguments": {}}
+                )
+            except ToolError as exc:
+                print("DISPATCH_DENIED=True|" + str(exc))
+            else:
+                print("DISPATCH_DENIED=False|scope-restricted dispatch unexpectedly ran")
     finally:
         http_server.should_exit = True
         await server_task
@@ -129,3 +140,11 @@ def test_http_transport_propagates_verified_token_and_enforces_scopes(tmp_path):
     assert denied.startswith("True|"), denied
     assert "Insufficient scope" in denied, denied
     assert "SHOULD_NOT_EXECUTE" not in denied, denied
+
+    dispatch_denied = next(
+        line.partition("DISPATCH_DENIED=")[2]
+        for line in lines if "DISPATCH_DENIED=" in line
+    )
+    assert dispatch_denied.startswith("True|"), dispatch_denied
+    assert "Insufficient scope" in dispatch_denied, dispatch_denied
+    assert "send_message" in dispatch_denied, dispatch_denied
