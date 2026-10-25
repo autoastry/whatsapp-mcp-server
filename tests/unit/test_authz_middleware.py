@@ -88,3 +88,40 @@ def test_authz_middleware_fails_closed_when_request_token_context_is_missing(mon
                 _context("list_chats"), call_next
             )
         )
+
+def test_every_registered_mcp_tool_has_an_explicit_scope_policy():
+    """New tools must not silently ship without an authorization policy."""
+    import ast
+    from pathlib import Path
+
+    project_root = Path(__file__).resolve().parents[2] / "whatsapp-mcp-server"
+    registered = set()
+    for source_path in project_root.rglob("*.py"):
+        tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for decorator in node.decorator_list:
+                if not isinstance(decorator, ast.Call):
+                    continue
+                func = decorator.func
+                if not (
+                    isinstance(func, ast.Attribute)
+                    and func.attr == "tool"
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id == "mcp"
+                ):
+                    continue
+                tool_name = node.name
+                for keyword in decorator.keywords:
+                    if keyword.arg == "name" and isinstance(keyword.value, ast.Constant):
+                        if isinstance(keyword.value.value, str):
+                            tool_name = keyword.value.value
+                registered.add(tool_name)
+
+    assert registered, "test must discover registered MCP tools"
+    assert registered <= set(observability.TOOL_SCOPES), (
+        f"Registered tools missing scope policies: "
+        f"{sorted(registered - set(observability.TOOL_SCOPES))}"
+    )
+
