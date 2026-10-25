@@ -291,7 +291,6 @@ def test_dispatch_denies_when_scope_policy_cannot_load(monkeypatch, toolsearch):
 def test_dispatch_error_does_not_expose_exception_details(toolsearch, monkeypatch, caplog):
     """Tool exceptions can contain credentials or message content; never return them."""
     import asyncio
-    from types import SimpleNamespace
 
     class FailingTool:
         parameters = {
