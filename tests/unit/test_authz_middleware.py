@@ -99,7 +99,7 @@ def test_every_registered_mcp_tool_has_an_explicit_scope_policy():
     for source_path in project_root.rglob("*.py"):
         tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
         for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
             for decorator in node.decorator_list:
                 if not isinstance(decorator, ast.Call):
