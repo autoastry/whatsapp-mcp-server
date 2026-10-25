@@ -205,20 +205,29 @@ class AccountRegistry:
         if role not in {"operator", "reader"}:
             raise ValueError("Only operator or reader grants are supported")
         with self._lock:
-            self.require_account_access(actor, account, "manage")
-            target = self._db.execute(
-                "SELECT status FROM platform_principals WHERE principal_id = ?",
-                (principal,),
-            ).fetchone()
-            if target is None or target["status"] != "active":
-                raise AuthorizationDenied("Account access denied")
-            self._db.execute(
-                """INSERT INTO account_ownership(principal_id, account_id, role, status)
-                   VALUES (?, ?, ?, 'active')
-                   ON CONFLICT(principal_id, account_id) DO UPDATE SET
-                       role = excluded.role, status = 'active'""",
-                (principal, account, role),
-            )
+            try:
+                # Serialize authorization and grant changes across registry
+                # instances, not only threads sharing this Python object.
+                self._db.execute("BEGIN IMMEDIATE")
+                self.require_account_access(actor, account, "manage")
+                target = self._db.execute(
+                    "SELECT status FROM platform_principals WHERE principal_id = ?",
+                    (principal,),
+                ).fetchone()
+                if target is None or target["status"] != "active":
+                    raise AuthorizationDenied("Account access denied")
+                self._db.execute(
+                    """INSERT INTO account_ownership(principal_id, account_id, role, status)
+                       VALUES (?, ?, ?, 'active')
+                       ON CONFLICT(principal_id, account_id) DO UPDATE SET
+                           role = excluded.role, status = 'active'""",
+                    (principal, account, role),
+                )
+                self._db.execute("COMMIT")
+            except Exception:
+                if self._db.in_transaction:
+                    self._db.execute("ROLLBACK")
+                raise
 
     def revoke_access(
         self, actor_principal_id: str, principal_id: str, account_id: str
@@ -228,14 +237,21 @@ class AccountRegistry:
         principal = self._required_id(principal_id, "principal_id")
         account = self._required_id(account_id, "account_id")
         with self._lock:
-            self.require_account_access(actor, account, "manage")
-            cursor = self._db.execute(
-                """UPDATE account_ownership SET status = 'revoked'
-                   WHERE principal_id = ? AND account_id = ? AND role != 'owner'""",
-                (principal, account),
-            )
-            if cursor.rowcount != 1:
-                raise AuthorizationDenied("Account access denied")
+            try:
+                self._db.execute("BEGIN IMMEDIATE")
+                self.require_account_access(actor, account, "manage")
+                cursor = self._db.execute(
+                    """UPDATE account_ownership SET status = 'revoked'
+                       WHERE principal_id = ? AND account_id = ? AND role != 'owner'""",
+                    (principal, account),
+                )
+                if cursor.rowcount != 1:
+                    raise AuthorizationDenied("Account access denied")
+                self._db.execute("COMMIT")
+            except Exception:
+                if self._db.in_transaction:
+                    self._db.execute("ROLLBACK")
+                raise
 
     def set_account_status(
         self, actor_principal_id: str, account_id: str, status: str
