@@ -237,18 +237,33 @@ class AccountRegistry:
             if cursor.rowcount != 1:
                 raise AuthorizationDenied("Account access denied")
 
-    def set_account_status(self, account_id: str, status: str) -> None:
+    def set_account_status(
+        self, actor_principal_id: str, account_id: str, status: str
+    ) -> None:
+        """Change lifecycle state only when the active owner may manage the account."""
         if status not in ACCOUNT_STATUSES:
             raise ValueError("Invalid account status")
+        actor = self._required_id(actor_principal_id, "actor_principal_id")
+        account = self._required_id(account_id, "account_id")
         with self._lock:
-            cursor = self._db.execute(
-                """UPDATE whatsapp_accounts
-                   SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                   WHERE account_id = ?""",
-                (status, self._required_id(account_id, "account_id")),
-            )
-            if cursor.rowcount != 1:
-                raise ValueError("Unknown account")
+            try:
+                # Keep authorization and the write in one SQLite transaction so
+                # another registry connection cannot revoke the grant between them.
+                self._db.execute("BEGIN IMMEDIATE")
+                self.require_account_access(actor, account, "manage")
+                cursor = self._db.execute(
+                    """UPDATE whatsapp_accounts
+                       SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                       WHERE account_id = ?""",
+                    (status, account),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("Unknown account")
+                self._db.execute("COMMIT")
+            except Exception:
+                if self._db.in_transaction:
+                    self._db.execute("ROLLBACK")
+                raise
 
     def require_account_access(self, principal_id: str, account_id: str, action: str) -> None:
         """Raise one generic denial unless identity, grant, role, and state all allow it."""
