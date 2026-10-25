@@ -64,6 +64,33 @@ class AccountRegistry:
 
     def _initialize(self) -> None:
         with self._lock:
+            registry_tables = {
+                "schema_migrations",
+                "platform_principals",
+                "whatsapp_accounts",
+                "account_ownership",
+            }
+            existing_tables = {
+                row["name"]
+                for row in self._db.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                )
+            }
+            unrelated_tables = existing_tables - registry_tables
+            if unrelated_tables:
+                raise RuntimeError(
+                    "Registry database contains unrelated tables; refusing to initialize"
+                )
+            if "schema_migrations" in existing_tables:
+                versions = [
+                    row["version"]
+                    for row in self._db.execute("SELECT version FROM schema_migrations")
+                ]
+                if versions and max(versions) > SCHEMA_VERSION:
+                    raise RuntimeError(
+                        "Registry schema is newer than this application supports"
+                    )
             self._db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS schema_migrations (
