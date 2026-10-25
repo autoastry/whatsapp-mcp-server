@@ -105,3 +105,46 @@ def test_unknown_action_is_denied(registry):
     account = pair(registry)
     with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
         registry.require_account_access("alice", account, "admin")
+
+def test_registry_refuses_to_initialize_in_database_with_unrelated_tables(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "legacy-store.db"
+    with sqlite3.connect(db_path) as db:
+        db.execute("CREATE TABLE legacy_messages (id INTEGER PRIMARY KEY)")
+
+    with pytest.raises(RuntimeError, match="contains unrelated tables"):
+        AccountRegistry(db_path)
+
+    with sqlite3.connect(db_path) as db:
+        tables = {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+    assert tables == {"legacy_messages"}
+
+
+def test_registry_rejects_future_schema_without_creating_tables(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "future-registry.db"
+    with sqlite3.connect(db_path) as db:
+        db.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)")
+        db.execute("INSERT INTO schema_migrations(version) VALUES (999)")
+
+    with pytest.raises(RuntimeError, match="newer than this application supports"):
+        AccountRegistry(db_path)
+
+    with sqlite3.connect(db_path) as db:
+        tables = {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+    assert tables == {"schema_migrations"}
+
