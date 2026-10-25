@@ -28,6 +28,20 @@ SERVER_DIR = Path(__file__).resolve().parents[2] / "whatsapp-mcp-server"
         ),
         (
             [
+                {"token": "same-secret", "client_id": "client-a", "scopes": ["whatsapp:read"]},
+                {"token": " same-secret ", "client_id": "client-b", "scopes": ["whatsapp:read"]},
+            ],
+            "duplicate token",
+        ),
+        (
+            [
+                {"token": "secret-a", "client_id": "same-client", "scopes": ["whatsapp:read"]},
+                {"token": "secret-b", "client_id": " same-client ", "scopes": ["whatsapp:read"]},
+            ],
+            "duplicate client_id",
+        ),
+        (
+            [
                 {"token": "secret-a", "client_id": "same-client", "scopes": ["whatsapp:read"]},
                 {"token": "secret-b", "client_id": "same-client", "scopes": ["whatsapp:send"]},
             ],
