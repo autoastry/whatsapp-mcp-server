@@ -90,9 +90,15 @@ if _TOKENS_JSON:
             raise SystemExit(f"Token entry {index} scopes must be a JSON array.")
         _register_token(token, client_id, scopes)
 
-# Legacy single-token fallback
+# Legacy single-token fallback. If both settings are supplied, reject overlap
+# instead of silently choosing the multi-token entry's identity and scopes.
 _LEGACY = os.environ.get("WHATSAPP_MCP_TOKEN", "").strip()
-if _LEGACY and _LEGACY not in _TOKENS:
+if _LEGACY and _LEGACY in _TOKENS:
+    raise SystemExit(
+        "WHATSAPP_MCP_TOKEN duplicates a token configured in "
+        "WHATSAPP_MCP_TOKENS_JSON. Configure each token only once."
+    )
+if _LEGACY:
     _register_token(_LEGACY, "owner", ["whatsapp:full"])
 
 if not _TOKENS:
