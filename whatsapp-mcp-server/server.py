@@ -38,34 +38,62 @@ log = logging.getLogger("whatsapp_mcp")
 import json as _json
 
 # N7 + G11: multi-token registry with per-token scopes.
-# The classic path (single WHATSAPP_MCP_TOKEN with scopes:["whatsapp:full"])
-# still works. To use per-tool scopes, set WHATSAPP_MCP_TOKENS_JSON with a
-# JSON array like:
-#   [{"token":"abc...", "client_id":"myphone", "scopes":["whatsapp:read","whatsapp:send"]},
-#    {"token":"def...", "client_id":"biscript", "scopes":["whatsapp:read"]}]
-# Scopes recognized: whatsapp:read, whatsapp:send, whatsapp:admin, whatsapp:full
-# (whatsapp:full = superset of all three).
+# Configuration is deliberately strict: silently skipping or overwriting an
+# entry can grant an unintended identity or permission set.
+_ALLOWED_SCOPES = {
+    "whatsapp:read", "whatsapp:send", "whatsapp:admin", "whatsapp:full",
+}
 _TOKENS: dict[str, dict] = {}
+_CLIENT_IDS: set[str] = set()
+
+
+def _register_token(token: str, client_id: str, scopes: list[str]) -> None:
+    """Validate and register one credential without silent overwrite."""
+    token = token.strip()
+    client_id = client_id.strip()
+    if not token:
+        raise SystemExit("Token configuration contains an empty token.")
+    if not client_id:
+        raise SystemExit("Token configuration contains an empty client_id.")
+    if token in _TOKENS:
+        raise SystemExit("Token configuration contains a duplicate token.")
+    if client_id in _CLIENT_IDS:
+        raise SystemExit(f"Token configuration contains duplicate client_id: {client_id!r}.")
+    if not scopes or any(not isinstance(scope, str) or not scope.strip() for scope in scopes):
+        raise SystemExit(f"Token {client_id!r} must have a non-empty list of scopes.")
+    if len(scopes) != len(set(scopes)):
+        raise SystemExit(f"Token {client_id!r} contains duplicate scopes.")
+    unknown = sorted(set(scopes) - _ALLOWED_SCOPES)
+    if unknown:
+        raise SystemExit(f"Token {client_id!r} has unsupported scopes: {unknown!r}.")
+    _TOKENS[token] = {"client_id": client_id, "scopes": scopes}
+    _CLIENT_IDS.add(client_id)
+
 
 _TOKENS_JSON = os.environ.get("WHATSAPP_MCP_TOKENS_JSON", "").strip()
 if _TOKENS_JSON:
     try:
         entries = _json.loads(_TOKENS_JSON)
-        for e in entries:
-            tok = str(e.get("token", "")).strip()
-            if not tok:
-                continue
-            _TOKENS[tok] = {
-                "client_id": str(e.get("client_id", "unknown")),
-                "scopes":    list(e.get("scopes", ["whatsapp:read"])),
-            }
     except (ValueError, TypeError) as exc:
         raise SystemExit(f"WHATSAPP_MCP_TOKENS_JSON is invalid JSON: {exc}") from exc
+    if not isinstance(entries, list):
+        raise SystemExit("WHATSAPP_MCP_TOKENS_JSON must be a JSON array.")
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise SystemExit(f"Token entry {index} must be a JSON object.")
+        token = entry.get("token")
+        client_id = entry.get("client_id")
+        scopes = entry.get("scopes", ["whatsapp:read"])
+        if not isinstance(token, str) or not isinstance(client_id, str):
+            raise SystemExit(f"Token entry {index} requires string token and client_id fields.")
+        if not isinstance(scopes, list):
+            raise SystemExit(f"Token entry {index} scopes must be a JSON array.")
+        _register_token(token, client_id, scopes)
 
 # Legacy single-token fallback
 _LEGACY = os.environ.get("WHATSAPP_MCP_TOKEN", "").strip()
 if _LEGACY and _LEGACY not in _TOKENS:
-    _TOKENS[_LEGACY] = {"client_id": "owner", "scopes": ["whatsapp:full"]}
+    _register_token(_LEGACY, "owner", ["whatsapp:full"])
 
 if not _TOKENS:
     raise SystemExit(
