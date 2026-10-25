@@ -97,3 +97,32 @@ def test_invalid_multi_token_configuration_fails_closed(tmp_path, entries, expec
 
     assert proc.returncode != 0, "invalid token configuration unexpectedly started"
     assert expected_error in proc.stderr, proc.stderr[-3000:]
+
+def test_legacy_token_overlapping_multi_token_fails_closed(tmp_path):
+    for name in ("messages.db", "whatsapp.db"):
+        sqlite3.connect(tmp_path / name).close()
+    env = {
+        **os.environ,
+        "WHATSAPP_MCP_TOKEN": "shared-secret",
+        "WHATSAPP_MCP_TOKENS_JSON": json.dumps(
+            [{"token": "shared-secret", "client_id": "client-a", "scopes": ["whatsapp:read"]}]
+        ),
+        "WHATSAPP_MCP_TOOLSET": "minimal",
+        "MESSAGES_DB_PATH": str(tmp_path / "messages.db"),
+        "WHATSMEOW_DB_PATH": str(tmp_path / "whatsapp.db"),
+        "WHATSAPP_MCP_SHORT_DB": str(tmp_path / "short.db"),
+        "WHATSAPP_MCP_SCHEDULE_DB": str(tmp_path / "schedule.db"),
+        "WHATSAPP_API_BASE_URL": "http://127.0.0.1:9/api",
+        "WHATSAPP_MCP_AUDIT_LOG": str(tmp_path / "audit.jsonl"),
+    }
+    proc = subprocess.run(
+        [sys.executable, "-c", "import server"],
+        cwd=SERVER_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert proc.returncode != 0, "overlapping credentials unexpectedly started"
+    assert "duplicates a token configured in WHATSAPP_MCP_TOKENS_JSON" in proc.stderr
