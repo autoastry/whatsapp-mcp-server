@@ -148,3 +148,20 @@ def test_registry_rejects_future_schema_without_creating_tables(tmp_path):
         }
     assert tables == {"schema_migrations"}
 
+def test_duplicate_account_creation_rolls_back_without_granting_foreign_access(registry):
+    import sqlite3
+
+    registry.create_principal("alice")
+    registry.create_principal("bob")
+    account = registry.create_account("alice", "shared-id", "active")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        registry.create_account("bob", "shared-id", "active")
+
+    registry.require_account_access("alice", account, "manage")
+    with pytest.raises(AuthorizationDenied):
+        registry.require_account_access("bob", account, "read")
+
+    bob_account = registry.create_account("bob", "bob-account", "active")
+    registry.require_account_access("bob", bob_account, "manage")
+
