@@ -8,6 +8,7 @@ must never break.
 from __future__ import annotations
 
 import pytest
+from typing import ClassVar
 
 
 class TestStem:
@@ -293,7 +294,7 @@ def test_dispatch_error_does_not_expose_exception_details(toolsearch, monkeypatc
     import asyncio
 
     class FailingTool:
-        parameters = {
+        parameters: ClassVar[dict] = {
             "type": "object",
             "properties": {"chat_jid": {"type": "string"}},
             "required": ["chat_jid"],
