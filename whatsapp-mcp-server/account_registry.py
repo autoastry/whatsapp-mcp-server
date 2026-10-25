@@ -60,7 +60,11 @@ class AccountRegistry:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA foreign_keys = ON")
         self._db.execute("PRAGMA busy_timeout = 5000")
-        self._initialize()
+        try:
+            self._initialize()
+        except Exception:
+            self._db.close()
+            raise
 
     def _initialize(self) -> None:
         with self._lock:
