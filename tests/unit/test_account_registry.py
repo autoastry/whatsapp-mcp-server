@@ -51,7 +51,7 @@ def test_disabled_principal_and_revoked_account_are_denied(registry):
     with pytest.raises(AuthorizationDenied):
         registry.require_account_access("alice", account, "read")
     registry.set_principal_status("alice", "active")
-    registry.set_account_status(account, "revoked")
+    registry.set_account_status("alice", account, "revoked")
     with pytest.raises(AuthorizationDenied):
         registry.require_account_access("alice", account, "read")
 
@@ -165,3 +165,16 @@ def test_duplicate_account_creation_rolls_back_without_granting_foreign_access(r
     bob_account = registry.create_account("bob", "bob-account", "active")
     registry.require_account_access("bob", bob_account, "manage")
 
+
+
+def test_only_owner_can_change_account_lifecycle_state(registry):
+    account = pair(registry)
+
+    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+        registry.set_account_status("bob", account, "disconnected")
+
+    registry.require_account_access("alice", account, "manage")
+    registry.set_account_status("alice", account, "disconnected")
+    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+        registry.require_account_access("alice", account, "send")
+    registry.require_account_access("alice", account, "manage")
