@@ -102,9 +102,9 @@ def test_every_registered_mcp_tool_has_an_explicit_scope_policy():
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
             for decorator in node.decorator_list:
-                if not isinstance(decorator, ast.Call):
-                    continue
-                func = decorator.func
+                # Support both @mcp.tool and @mcp.tool(...). Otherwise a new
+                # bare decorator could bypass this source-level policy audit.
+                func = decorator.func if isinstance(decorator, ast.Call) else decorator
                 if not (
                     isinstance(func, ast.Attribute)
                     and func.attr == "tool"
@@ -113,10 +113,11 @@ def test_every_registered_mcp_tool_has_an_explicit_scope_policy():
                 ):
                     continue
                 tool_name = node.name
-                for keyword in decorator.keywords:
-                    if keyword.arg == "name" and isinstance(keyword.value, ast.Constant):
-                        if isinstance(keyword.value.value, str):
-                            tool_name = keyword.value.value
+                if isinstance(decorator, ast.Call):
+                    for keyword in decorator.keywords:
+                        if keyword.arg == "name" and isinstance(keyword.value, ast.Constant):
+                            if isinstance(keyword.value.value, str):
+                                tool_name = keyword.value.value
                 registered.add(tool_name)
 
     assert registered, "test must discover registered MCP tools"
