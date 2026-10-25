@@ -178,3 +178,30 @@ def test_only_owner_can_change_account_lifecycle_state(registry):
     with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
         registry.require_account_access("alice", account, "send")
     registry.require_account_access("alice", account, "manage")
+
+
+def test_disabled_principal_cannot_receive_account_grant(registry):
+    account = pair(registry)
+    registry.set_principal_status("bob", "disabled")
+
+    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+        registry.grant_access("alice", "bob", account, "reader")
+
+    registry.set_principal_status("bob", "active")
+    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+        registry.require_account_access("bob", account, "read")
+
+
+def test_owner_can_restore_revoked_non_owner_grant_with_explicit_grant(registry):
+    account = pair(registry)
+    registry.grant_access("alice", "bob", account, "reader")
+    registry.revoke_access("alice", "bob", account)
+
+    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+        registry.require_account_access("bob", account, "read")
+
+    registry.grant_access("alice", "bob", account, "operator")
+    registry.require_account_access("bob", account, "read")
+    registry.require_account_access("bob", account, "send")
+    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+        registry.require_account_access("bob", account, "manage")
