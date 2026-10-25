@@ -49,6 +49,26 @@ SERVER_DIR = Path(__file__).resolve().parents[2] / "whatsapp-mcp-server"
             ["not-an-object"],
             "must be a JSON object",
         ),
+        (
+            {"token": "secret-a", "client_id": "client-a", "scopes": ["whatsapp:read"]},
+            "must be a JSON array",
+        ),
+        (
+            [{"token": "", "client_id": "client-a", "scopes": ["whatsapp:read"]}],
+            "empty token",
+        ),
+        (
+            [{"token": "secret-a", "client_id": "  ", "scopes": ["whatsapp:read"]}],
+            "empty client_id",
+        ),
+        (
+            [{"token": "secret-a", "scopes": ["whatsapp:read"]}],
+            "requires string token and client_id fields",
+        ),
+        (
+            [{"token": "secret-a", "client_id": "client-a", "scopes": "whatsapp:read"}],
+            "scopes must be a JSON array",
+        ),
     ],
 )
 def test_invalid_multi_token_configuration_fails_closed(tmp_path, entries, expected_error):
