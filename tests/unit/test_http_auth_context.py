@@ -26,6 +26,7 @@ import socket
 import server
 import uvicorn
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_access_token
 from observability import TOOL_SCOPES
 
@@ -68,9 +69,12 @@ async def main():
         async with Client(f"http://127.0.0.1:{port}/mcp", auth="read-only-secret") as client:
             context_result = await client.call_tool("auth_context_probe", {})
             print("CONTEXT=" + context_result.content[0].text)
-            denied_result = await client.call_tool("authz_scope_probe", {})
-            denied_text = denied_result.content[0].text if denied_result.content else ""
-            print("DENIED=" + str(denied_result.isError) + "|" + denied_text)
+            try:
+                await client.call_tool("authz_scope_probe", {})
+            except ToolError as exc:
+                print("DENIED=True|" + str(exc))
+            else:
+                print("DENIED=False|scope-restricted tool unexpectedly executed")
     finally:
         http_server.should_exit = True
         await server_task
