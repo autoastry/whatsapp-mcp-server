@@ -526,8 +526,10 @@ def _audit(name: str, args: Any, outcome: str, ms: float) -> None:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
             f.flush()
             os.fsync(f.fileno())
-    except Exception:
-        log.warning("call_tool audit failed for %s", name, exc_info=True)
+    except Exception as exc:
+        # Audit failures must be visible, but exception strings/tracebacks can
+        # contain filesystem details or data from downstream integrations.
+        log.warning("call_tool audit failed for %s (%s)", name, type(exc).__name__)
 
 
 _FIND_DESC = (
