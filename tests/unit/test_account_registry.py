@@ -425,6 +425,8 @@ def test_explicit_blank_account_id_is_rejected_without_creating_account(
         registry.create_account("alice", invalid_account_id)
 
     # A rejected explicit identifier must not silently create an unrelated UUID.
-    with registry._lock:
-        rows = registry._db.execute("SELECT account_id FROM whatsapp_accounts").fetchall()
+    import sqlite3
+
+    with sqlite3.connect(registry.db_path) as db:
+        rows = db.execute("SELECT account_id FROM whatsapp_accounts").fetchall()
     assert rows == []
