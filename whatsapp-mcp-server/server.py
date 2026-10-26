@@ -1,11 +1,14 @@
 """Authenticated HTTP entrypoint for the WhatsApp MCP server.
 
-Serves the WhatsApp tools over Streamable HTTP at /mcp, gated by a single
-owner bearer token. Only ONE principal exists: the owner. Every request must
-carry `Authorization: Bearer <WHATSAPP_MCP_TOKEN>`; anything else -> 401.
+Serves MCP tools over Streamable HTTP at /mcp. Transport authentication accepts
+one or more statically configured bearer tokens, each mapped to a configured
+client_id and tool scopes. Per-tool scopes are enforced at dispatch.
 
-We use FastMCP v2's built-in StaticTokenVerifier (no custom verifier needed)
-keyed on exactly one token read from the environment.
+Important boundary: a verified token client_id is not automatically a platform
+principal, and the account registry / client-to-principal mapping are not yet
+wired into every tool and bridge operation. This entrypoint therefore does not
+by itself provide end-to-end multi-user account isolation. Do not expose it as
+a multi-tenant production service until that integration and its tests exist.
 
 Run (production, behind nginx on loopback):
     gunicorn server:asgi_app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:9000 -w 2
@@ -107,11 +110,10 @@ if not _TOKENS:
         "WHATSAPP_MCP_TOKENS_JSON. Refusing to serve unauthenticated."
     )
 
-# FastMCP's StaticTokenVerifier requires a global required_scopes; we cannot
-# enforce per-tool scope there. Instead we grant every token the umbrella
-# scope "whatsapp:authenticated" so requests pass the transport-level check,
-# then let the ObservabilityMiddleware (or a new AuthzMiddleware) reject
-# per-tool at dispatch time based on the token's declared scopes.
+# FastMCP's StaticTokenVerifier requires a global required_scopes; it cannot
+# enforce our per-tool scope matrix by itself. Give verified tokens the umbrella
+# transport scope, then enforce each registered tool's declared policy in
+# AuthzMiddleware. This is token-level authorization, not account ownership.
 _verifier_tokens: dict[str, dict] = {}
 for _tok, _meta in _TOKENS.items():
     _verifier_tokens[_tok] = {
