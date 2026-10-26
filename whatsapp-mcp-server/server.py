@@ -130,8 +130,11 @@ auth = StaticTokenVerifier(
 mcp = FastMCP(
     name="whatsapp",
     instructions=(
-        "Private WhatsApp access for the owner. Search contacts and chats, read "
-        "message history with context, send messages/files/voice notes, and "
+        "Private WhatsApp access for the authenticated client. Available actions "
+        "depend on the bearer token's configured scopes. Account ownership isolation "
+        "is not yet wired end-to-end; do not treat this server as multi-tenant safe. "
+        "Search contacts and chats, read message history with context, send "
+        "messages/files/voice notes, and "
         "download media. Phone numbers use country code with no + or symbols; "
         "group chats use the @g.us JID.\n"
         "IDENTITY: one person appears under BOTH their phone number (in DMs) and a "
