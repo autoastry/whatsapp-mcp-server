@@ -131,3 +131,16 @@ def test_every_registered_mcp_tool_has_an_explicit_scope_policy():
         f"{sorted(registered - set(observability.TOOL_SCOPES))}"
     )
 
+
+
+def test_every_send_or_admin_scoped_tool_is_audited():
+    """Mutating operations must not bypass audit on direct or call_tool dispatch."""
+    mutating = {
+        name
+        for name, scope in observability.TOOL_SCOPES.items()
+        if scope in {"whatsapp:send", "whatsapp:admin"}
+    }
+    assert mutating <= observability.AUDIT_MUTATING_TOOLS, (
+        "Mutating tools missing audit policy: "
+        f"{sorted(mutating - observability.AUDIT_MUTATING_TOOLS)}"
+    )
