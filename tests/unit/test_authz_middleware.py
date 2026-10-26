@@ -170,3 +170,36 @@ def test_observability_audit_write_failure_redacts_exception_text(
     assert "secret-token" not in caplog.text
     assert "private message body" not in caplog.text
     assert "OSError" in caplog.text
+
+
+def test_mutation_audit_persists_only_argument_hash_not_raw_payload(
+    monkeypatch, tmp_path
+):
+    import json
+
+    audit_path = tmp_path / "audit.jsonl"
+    monkeypatch.setattr(observability, "AUDIT_LOG_PATH", audit_path)
+    context = _context("send_message")
+    context.message.arguments = {
+        "to": "123456789@s.whatsapp.net",
+        "text": "private-message-body",
+        "authorization": "secret-token-value",
+    }
+
+    async def call_next(_context):
+        return "sent"
+
+    result = asyncio.run(
+        observability.ObservabilityMiddleware().on_call_tool(context, call_next)
+    )
+
+    assert result == "sent"
+    raw_log = audit_path.read_text(encoding="utf-8")
+    assert "private-message-body" not in raw_log
+    assert "secret-token-value" not in raw_log
+    assert "123456789@s.whatsapp.net" not in raw_log
+    row = json.loads(raw_log)
+    assert row["tool"] == "send_message"
+    assert row["args_hash"]
+    assert len(row["args_hash"]) == 16
+    assert row["outcome"] == "ok"
