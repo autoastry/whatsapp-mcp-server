@@ -43,6 +43,18 @@ _REQUIRED_OWNERSHIP_FOREIGN_KEYS: Final = frozenset(
         ("account_id", "whatsapp_accounts", "account_id"),
     }
 )
+_REQUIRED_SCHEMA_FRAGMENTS: Final = {
+    "platform_principals": (
+        "CHECK (STATUS IN ('ACTIVE', 'DISABLED'))",
+    ),
+    "whatsapp_accounts": (
+        "CHECK (STATUS IN ('PENDING_PAIRING', 'ACTIVE', 'DISCONNECTED', 'REVOKED', 'ERROR'))",
+    ),
+    "account_ownership": (
+        "CHECK (ROLE IN ('OWNER', 'OPERATOR', 'READER'))",
+        "CHECK (STATUS IN ('ACTIVE', 'REVOKED'))",
+    ),
+}
 
 _ROLE_ACTIONS: Final = {
     "owner": ACTIONS,
@@ -131,9 +143,18 @@ class AccountRegistry:
                         key=lambda row: row["pk"],
                     )
                 )
+                definition_row = self._db.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                    (table,),
+                ).fetchone()
+                normalized_sql = " ".join((definition_row["sql"] or "").upper().split())
                 if (
                     not _REQUIRED_COLUMNS[table] <= columns
                     or primary_key != _REQUIRED_PRIMARY_KEYS[table]
+                    or any(
+                        fragment not in normalized_sql
+                        for fragment in _REQUIRED_SCHEMA_FRAGMENTS.get(table, ())
+                    )
                 ):
                     raise RuntimeError(
                         "Registry database contains a malformed table; refusing to initialize"
