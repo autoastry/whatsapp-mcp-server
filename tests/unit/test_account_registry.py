@@ -329,3 +329,35 @@ def test_registry_refuses_known_columns_without_required_primary_key(tmp_path):
             )
         }
     assert tables == {"schema_migrations", "whatsapp_accounts"}
+
+
+def test_registry_refuses_known_table_without_lifecycle_check_constraints(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "missing-check-registry.db"
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "CREATE TABLE schema_migrations "
+            "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+        )
+        db.execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (1, 'fixture')"
+        )
+        db.execute(
+            "CREATE TABLE whatsapp_accounts ("
+            "account_id TEXT PRIMARY KEY, status TEXT NOT NULL, "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+
+    with pytest.raises(RuntimeError, match="malformed table"):
+        AccountRegistry(db_path)
+
+    with sqlite3.connect(db_path) as db:
+        tables = {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+    assert tables == {"schema_migrations", "whatsapp_accounts"}
