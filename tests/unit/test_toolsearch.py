@@ -327,3 +327,20 @@ def test_dispatch_error_does_not_expose_exception_details(toolsearch, monkeypatc
     assert "private message body" not in str(result)
     assert "secret-token" not in caplog.text
     assert "private message body" not in caplog.text
+
+
+def test_dispatch_audit_failure_does_not_log_exception_details(
+    toolsearch, monkeypatch, caplog
+):
+    from pathlib import Path
+    import observability
+
+    def fail_open(*args, **kwargs):
+        raise RuntimeError("token=secret-token and private message body")
+
+    monkeypatch.setattr(Path, "open", fail_open)
+    toolsearch._audit("send_message", {"text": "private message body"}, "error", 1.0)
+
+    assert "secret-token" not in caplog.text
+    assert "private message body" not in caplog.text
+    assert "RuntimeError" in caplog.text
