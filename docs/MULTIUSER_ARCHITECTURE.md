@@ -347,3 +347,12 @@ These transactions protect registry consistency only. They do not make an extern
 Lifecycle status is also a policy seam, not proof of WhatsApp authentication. Setting a registry row to active must eventually be driven by a trusted lifecycle controller after the bridge confirms a valid linked-device session; an owner or tool argument must not be allowed to manufacture a successful pairing state. The current registry is not wired to such a controller, so these changes do not yet establish production enforcement.
 
 **Verification boundary:** hosted CI validates unit behavior only. No multi-process deployment, Docker backup/restore rehearsal, live pairing, or real-session recovery was performed in this environment. Phase 1 and runtime multi-user implementation remain blocked on the operational rehearsal and repository history review.
+
+
+## 16. Principal disablement and ownership recovery
+
+A principal marked `disabled` is denied by the registry while disabled, but the principal row and its existing account grants are retained. Re-enabling that principal makes still-active grants effective again. This is reversible suspension, not permanent revocation; operators must use `revoke_access` to remove a non-owner grant.
+
+The current isolated registry has no ownership-transfer or audited break-glass recovery operation. Disabling an account's sole owner can therefore leave its account without an active manager until that owner is re-enabled. Do not wire principal disablement into a user-deletion workflow or permit irreversible account-owner deactivation until an audited ownership-transfer/recovery design exists. That design must prevent self-approval, preserve account/session ownership history, and make the transfer atomic.
+
+This is a known pre-integration limitation, not a claim that production account recovery is implemented.
