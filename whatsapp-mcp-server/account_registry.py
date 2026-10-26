@@ -216,7 +216,7 @@ class AccountRegistry:
 
     def create_principal(self, principal_id: str, status: str = "active") -> None:
         principal_id = self._required_id(principal_id, "principal_id")
-        if status not in PRINCIPAL_STATUSES:
+        if not isinstance(status, str) or status not in PRINCIPAL_STATUSES:
             raise ValueError("Invalid principal status")
         with self._lock:
             self._db.execute(
@@ -245,7 +245,7 @@ class AccountRegistry:
             if account_id is not None
             else str(uuid.uuid4())
         )
-        if status not in ACCOUNT_STATUSES:
+        if not isinstance(status, str) or status not in ACCOUNT_STATUSES:
             raise ValueError("Invalid account status")
         with self._lock:
             try:
@@ -279,7 +279,7 @@ class AccountRegistry:
         actor = self._required_id(actor_principal_id, "actor_principal_id")
         principal = self._required_id(principal_id, "principal_id")
         account = self._required_id(account_id, "account_id")
-        if role not in {"operator", "reader"}:
+        if not isinstance(role, str) or role not in {"operator", "reader"}:
             raise ValueError("Only operator or reader grants are supported")
         with self._lock:
             try:
@@ -364,7 +364,7 @@ class AccountRegistry:
 
     def require_account_access(self, principal_id: str, account_id: str, action: str) -> None:
         """Raise one generic denial unless identity, grant, role, and state all allow it."""
-        if action not in ACTIONS:
+        if not isinstance(action, str) or action not in ACTIONS:
             raise AuthorizationDenied("Account access denied")
         try:
             principal = self._required_id(principal_id, "principal_id")
