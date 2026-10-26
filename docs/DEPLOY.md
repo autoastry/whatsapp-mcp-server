@@ -61,12 +61,14 @@ docker compose up -d mcp # or bridge
    ```bash
    docker compose ps                       # all three healthy
    curl -s -o /dev/null -w '%{http_code}\n' https://whatsapp-mcp.example.com/health   # 200
-   # MCP responds + unauth is refused:
+   # MCP responds + unauth is refused (legacy single-token mode):
    TOKEN=$(grep -oP 'WHATSAPP_MCP_TOKEN=\K.*' .env)
    curl -s -o /dev/null -w '%{http_code}\n' -X POST https://whatsapp-mcp.example.com/mcp \
      -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
      -H 'Accept: application/json, text/event-stream' \
      -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'     # 200
+   # Multi-token mode: load a chosen token into TOKEN from your secret manager;
+   # do not echo the token or print WHATSAPP_MCP_TOKENS_JSON into logs.
    # fd health (the scheduler-leak canary): should be double digits, not near 65536
    docker exec whatsapp-mcp python -c "import os;print(len(os.listdir('/proc/1/fd')))"
    ```
@@ -74,6 +76,21 @@ docker compose up -d mcp # or bridge
    `tools/call`), not just the health check.
 
 7. **Commit + push** only after verifying. No Claude attribution in commits.
+
+## Authentication modes
+
+Compose passes both `WHATSAPP_MCP_TOKEN` (legacy) and `WHATSAPP_MCP_TOKENS_JSON` (multi-token) into the MCP container. Configure at least one. The JSON setting must be an array of entries such as:
+
+```json
+[
+  {"token":"<secret>","client_id":"reader-app","scopes":["whatsapp:read"]},
+  {"token":"<secret>","client_id":"sender-app","scopes":["whatsapp:read","whatsapp:send"]}
+]
+```
+
+Use distinct high-entropy tokens and unique client IDs. If both settings are present, both credential sets are active; the legacy token has full scope. Do not place real tokens in documentation, tickets, shell history, or CI logs. The server validates token configuration strictly and fails startup on malformed entries or duplicate tokens/client IDs.
+
+**Security boundary:** these settings provide token authentication and per-tool scopes, not end-to-end multi-user account isolation. A `client_id` is not an account owner, and the shared bridge, message database, scheduler, and media storage are not yet account-partitioned. Do not expose this deployment as a multi-tenant service on the strength of multi-token auth alone.
 
 ## nginx changes
 
@@ -126,9 +143,11 @@ images (other unrelated images).
   DNS-only, which loses origin-IP hiding and WAF in exchange.
 - **Repeated logouts.** WhatsApp flags datacenter IPs harder than residential
   ones. Re-pair; there is no way around this short of a residential egress.
-- **401 on a token you believe is valid.** Check the value reached the container
-  (`docker compose exec mcp env | grep WHATSAPP_MCP_TOKEN`) and that the client
-  sends `Authorization: Bearer <token>` exactly.
+- **401 on a token you believe is valid.** Confirm that the token is present in the
+  selected auth mode and that the client sends `Authorization: Bearer <token>`
+  exactly. Avoid printing secrets; check variable presence or token IDs rather
+  than dumping the token value. For multi-token mode, validate the JSON array,
+  unique client IDs, and configured scopes.
 - **QR never appears on a fresh store.** This was a real upstream bug: the
   current `GetFirstDevice` returns `(nil, nil)` rather than an error for an empty
   store. Fixed here; if you see it again after a whatsmeow bump, look there first.
