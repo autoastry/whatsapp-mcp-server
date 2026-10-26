@@ -216,13 +216,17 @@ class AccountRegistry:
                 ).fetchone()
                 if target is None or target["status"] != "active":
                     raise AuthorizationDenied("Account access denied")
-                self._db.execute(
+                cursor = self._db.execute(
                     """INSERT INTO account_ownership(principal_id, account_id, role, status)
                        VALUES (?, ?, ?, 'active')
                        ON CONFLICT(principal_id, account_id) DO UPDATE SET
-                           role = excluded.role, status = 'active'""",
+                           role = excluded.role, status = 'active'
+                       WHERE account_ownership.role != 'owner'""",
                     (principal, account, role),
                 )
+                if cursor.rowcount != 1:
+                    # An existing owner row must never be downgraded by a grant.
+                    raise AuthorizationDenied("Account access denied")
                 self._db.execute("COMMIT")
             except Exception:
                 if self._db.in_transaction:
