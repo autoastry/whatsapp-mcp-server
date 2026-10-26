@@ -225,7 +225,7 @@ class AccountRegistry:
             )
 
     def set_principal_status(self, principal_id: str, status: str) -> None:
-        if status not in PRINCIPAL_STATUSES:
+        if not isinstance(status, str) or status not in PRINCIPAL_STATUSES:
             raise ValueError("Invalid principal status")
         with self._lock:
             cursor = self._db.execute(
@@ -338,7 +338,7 @@ class AccountRegistry:
         self, actor_principal_id: str, account_id: str, status: str
     ) -> None:
         """Change lifecycle state only when the active owner may manage the account."""
-        if status not in ACCOUNT_STATUSES:
+        if not isinstance(status, str) or status not in ACCOUNT_STATUSES:
             raise ValueError("Invalid account status")
         actor = self._required_id(actor_principal_id, "actor_principal_id")
         account = self._required_id(account_id, "account_id")
