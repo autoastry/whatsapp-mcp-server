@@ -88,3 +88,67 @@ def test_every_data_resource_checks_scope_before_reading_data():
         assert isinstance(first.value, ast.Call)
         assert isinstance(first.value.func, ast.Name)
         assert first.value.func.id == "_require_resource_read_scope"
+
+
+class _ResourceRegistry:
+    def __init__(self):
+        self.handlers = {}
+
+    def resource(self, uri, **kwargs):
+        def decorate(function):
+            self.handlers[function.__name__] = function
+            return function
+        return decorate
+
+
+def _read_scoped_token(monkeypatch):
+    from fastmcp.server import dependencies
+
+    monkeypatch.setattr(
+        dependencies,
+        "get_access_token",
+        lambda: SimpleNamespace(scopes=["whatsapp:read"]),
+    )
+
+
+def test_message_resource_redacts_downstream_exception_text(
+    monkeypatch, caplog
+):
+    import json
+    import whatsapp
+
+    _read_scoped_token(monkeypatch)
+
+    def fail_message_context(*args, **kwargs):
+        raise RuntimeError("token=secret-token private message body")
+
+    monkeypatch.setattr(whatsapp, "get_message_context", fail_message_context)
+    registry = _ResourceRegistry()
+    resources.register(registry)
+
+    result = json.loads(registry.handlers["message_resource"]("message-id", "chat-jid"))
+    assert result == {"error": "Unable to read message resource"}
+    assert "secret-token" not in caplog.text
+    assert "private message body" not in caplog.text
+    assert "secret-token" not in str(result)
+
+
+def test_media_resource_redacts_media_error_text(monkeypatch, caplog):
+    import json
+    import media
+
+    _read_scoped_token(monkeypatch)
+
+    def fail_fetch_media(*args, **kwargs):
+        raise media.MediaError("https://internal.example/token=secret-token")
+
+    monkeypatch.setattr(media, "fetch_media", fail_fetch_media)
+    registry = _ResourceRegistry()
+    resources.register(registry)
+
+    result = registry.handlers["media_resource"]("message-id", "chat-jid")
+    body = json.loads(result["blob"].decode())
+    assert body == {"error": "Unable to read media resource"}
+    assert "secret-token" not in caplog.text
+    assert "internal.example" not in caplog.text
+    assert "secret-token" not in str(body)
