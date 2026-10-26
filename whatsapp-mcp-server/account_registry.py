@@ -20,6 +20,7 @@ ACCOUNT_STATUSES: Final = frozenset(
 OWNERSHIP_ROLES: Final = frozenset({"owner", "operator", "reader"})
 OWNERSHIP_STATUSES: Final = frozenset({"active", "revoked"})
 ACTIONS: Final = frozenset({"read", "send", "manage"})
+MAX_IDENTIFIER_LENGTH: Final = 256
 
 _REQUIRED_COLUMNS: Final = {
     "schema_migrations": frozenset({"version", "applied_at"}),
@@ -400,4 +401,9 @@ class AccountRegistry:
     def _required_id(value: str, field: str) -> str:
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{field} must be a non-empty string")
-        return value.strip()
+        normalized = value.strip()
+        if len(normalized) > MAX_IDENTIFIER_LENGTH:
+            raise ValueError(
+                f"{field} must be at most {MAX_IDENTIFIER_LENGTH} characters"
+            )
+        return normalized
