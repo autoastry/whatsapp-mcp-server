@@ -365,3 +365,14 @@ The chat, message, and media MCP resource handlers now explicitly require `whats
 This closes only the transport-scope gap. The current signed media URL payload carries message ID, chat JID, filename, and expiry; the signing key is derived from the legacy bearer token or the first token in the multi-token configuration. The short-link database and media directory are shared. There is no account ID or principal authorization in the signed claims/short-link records today. These links are bearer capabilities until expiry, so anyone who receives one can use it.
 
 Before multi-user production use, media URL issuance must verify the caller's trusted principal and account grant; claims and short-link records must bind to an internal account ID; media caches must be partitioned by account; and signing-key rotation/revocation semantics must be explicit. A valid HMAC alone is not proof that the current requester owns the referenced account. Do not claim tenant isolation for media or resources until this design is implemented and cross-account negative tests pass.
+
+
+## 18. Go bridge REST API trust boundary
+
+The current Go bridge registers a broad set of `/api/*` handlers for sends, downloads, edits, deletes, group administration, contacts, media, QR state, and diagnostics. These handlers do not currently enforce a verified platform principal or account-level authorization. The bridge binds to `0.0.0.0` inside its container by default, while `docker-compose.yml` uses `expose` rather than publishing the bridge port to the host. The MCP service reaches it over the private Docker network.
+
+This is network isolation, not service authentication. A process that can reach the bridge API can invoke operations against the one legacy WhatsApp client. Do not publish port 8080, use host networking, or place untrusted containers on the `wa` network. The compose deployment test now guards against accidental host-port publication and requires the MCP HTTP port to remain bound to loopback.
+
+Before multi-user production use, authenticate Python-to-Go requests with a service credential or equivalent authenticated channel, reject replay/tampered requests where applicable, and bind every request to a server-verified account/session identity. The Go side must resolve that account to the correct isolated client and independently enforce operation/account state; a Python-supplied account ID alone is not proof of authorization. Diagnostics, QR, media download, and event-stream routes need explicit authorization too, not just send endpoints.
+
+This is a documented blocker, not an implemented feature. No bridge authentication was added in this audit-only phase because doing so safely depends on the approved account/session routing design and compatibility tests.
