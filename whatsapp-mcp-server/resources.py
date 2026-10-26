@@ -79,8 +79,9 @@ def register(mcp) -> None:
             if d.get("timestamp"):
                 d["timestamp"] = d["timestamp"].isoformat()
             return json.dumps(d, ensure_ascii=False)
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        except Exception as exc:
+            log.warning("message resource read failed (%s)", type(exc).__name__)
+            return json.dumps({"error": "Unable to read message resource"})
 
     @mcp.resource(
         "media://{message_id}/{chat_jid}",
@@ -93,11 +94,15 @@ def register(mcp) -> None:
         _require_resource_read_scope()
         try:
             info = _fetch_media(message_id, chat_jid)
-        except MediaError as e:
-            # Represent failure as a small JSON blob so the client sees a
-            # readable body instead of empty bytes.
-            return {"blob": json.dumps({"error": str(e)}).encode(),
-                    "mimeType": "application/json"}
+        except MediaError as exc:
+            # Keep bridge paths, URLs, and downstream exception text out of the
+            # resource body. Detailed message/media diagnostics are not safe for
+            # an MCP client response.
+            log.warning("media resource read failed (%s)", type(exc).__name__)
+            return {
+                "blob": json.dumps({"error": "Unable to read media resource"}).encode(),
+                "mimeType": "application/json",
+            }
         import base64
         return {
             "blob": base64.b64encode(info["path"].read_bytes()).decode("ascii"),
