@@ -45,14 +45,14 @@ _REQUIRED_OWNERSHIP_FOREIGN_KEYS: Final = frozenset(
 )
 _REQUIRED_SCHEMA_FRAGMENTS: Final = {
     "platform_principals": (
-        "CHECK (STATUS IN ('ACTIVE', 'DISABLED'))",
+        "CHECK ( STATUS IN ('ACTIVE', 'DISABLED'))",
     ),
     "whatsapp_accounts": (
-        "CHECK (STATUS IN ('PENDING_PAIRING', 'ACTIVE', 'DISCONNECTED', 'REVOKED', 'ERROR'))",
+        "CHECK ( STATUS IN ('PENDING_PAIRING', 'ACTIVE', 'DISCONNECTED', 'REVOKED', 'ERROR'))",
     ),
     "account_ownership": (
-        "CHECK (ROLE IN ('OWNER', 'OPERATOR', 'READER'))",
-        "CHECK (STATUS IN ('ACTIVE', 'REVOKED'))",
+        "CHECK ( ROLE IN ('OWNER', 'OPERATOR', 'READER'))",
+        "CHECK ( STATUS IN ('ACTIVE', 'REVOKED'))",
     ),
 }
 
