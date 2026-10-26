@@ -517,3 +517,15 @@ def test_owner_cannot_manufacture_bridge_owned_account_states(
     with pytest.raises(ValueError, match="controlled by bridge lifecycle"):
         registry.set_account_status("alice", account, bridge_owned_status)
     registry.require_account_access("alice", account, "send")
+
+
+def test_owner_cannot_activate_pending_account_without_bridge_confirmation(registry):
+    registry.create_principal("alice")
+    account = registry.create_account("alice", "pending-account")
+
+    with pytest.raises(ValueError, match="controlled by bridge lifecycle"):
+        registry.set_account_status("alice", account, "active")
+
+    registry.require_account_access("alice", account, "manage")
+    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+        registry.require_account_access("alice", account, "read")
