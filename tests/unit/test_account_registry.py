@@ -430,3 +430,35 @@ def test_explicit_blank_account_id_is_rejected_without_creating_account(
     with sqlite3.connect(registry.db_path) as db:
         rows = db.execute("SELECT account_id FROM whatsapp_accounts").fetchall()
     assert rows == []
+
+
+@pytest.mark.parametrize("invalid_status", [None, [], 7, "unknown"])
+def test_principal_status_validation_rejects_wrong_types_and_values(
+    registry, invalid_status
+):
+    registry.create_principal("alice")
+    with pytest.raises(ValueError, match="Invalid principal status"):
+        registry.set_principal_status("alice", invalid_status)
+
+
+@pytest.mark.parametrize("invalid_status", [None, [], 7, "unknown"])
+def test_account_status_validation_rejects_wrong_types_and_values(
+    registry, invalid_status
+):
+    account = pair(registry)
+    with pytest.raises(ValueError, match="Invalid account status"):
+        registry.set_account_status("alice", account, invalid_status)
+
+
+@pytest.mark.parametrize("invalid_role", [None, [], 7, "owner"])
+def test_grant_role_validation_rejects_wrong_types_and_values(registry, invalid_role):
+    account = pair(registry)
+    with pytest.raises(ValueError, match="Only operator or reader grants are supported"):
+        registry.grant_access("alice", "bob", account, invalid_role)
+
+
+@pytest.mark.parametrize("invalid_action", [None, [], 7, "admin"])
+def test_access_check_denies_wrong_action_types_and_values(registry, invalid_action):
+    account = pair(registry)
+    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+        registry.require_account_access("alice", account, invalid_action)
