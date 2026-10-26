@@ -75,7 +75,15 @@ def test_every_data_resource_checks_scope_before_reading_data():
     }
     for name in ("chat_resource", "message_resource", "media_resource"):
         node = functions[name]
-        first = node.body[0]
+        statements = node.body
+        if (
+            statements
+            and isinstance(statements[0], ast.Expr)
+            and isinstance(statements[0].value, ast.Constant)
+            and isinstance(statements[0].value.value, str)
+        ):
+            statements = statements[1:]
+        first = statements[0]
         assert isinstance(first, ast.Expr)
         assert isinstance(first.value, ast.Call)
         assert isinstance(first.value.func, ast.Name)
