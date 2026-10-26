@@ -333,7 +333,6 @@ def test_dispatch_audit_failure_does_not_log_exception_details(
     toolsearch, monkeypatch, caplog
 ):
     from pathlib import Path
-    import observability
 
     def fail_open(*args, **kwargs):
         raise RuntimeError("token=secret-token and private message body")
