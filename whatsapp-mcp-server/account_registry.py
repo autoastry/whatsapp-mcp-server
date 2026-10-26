@@ -147,12 +147,12 @@ class AccountRegistry:
                     "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
                     (table,),
                 ).fetchone()
-                normalized_sql = " ".join((definition_row["sql"] or "").upper().split())
+                normalized_sql = "".join((definition_row["sql"] or "").upper().split())
                 if (
                     not _REQUIRED_COLUMNS[table] <= columns
                     or primary_key != _REQUIRED_PRIMARY_KEYS[table]
                     or any(
-                        fragment not in normalized_sql
+                        "".join(fragment.split()) not in normalized_sql
                         for fragment in _REQUIRED_SCHEMA_FRAGMENTS.get(table, ())
                     )
                 ):
