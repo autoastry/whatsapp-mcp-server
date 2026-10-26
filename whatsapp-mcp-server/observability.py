@@ -91,13 +91,12 @@ def _pick_audit_path() -> Path:
                 f.write("")
             if p != AUDIT_LOG_PATH:
                 log.warning(
-                    "audit: requested path %s is not writable; falling back to %s "
-                    "(ephemeral). Fix by chowning the wa-audit volume to uid 10001.",
-                    AUDIT_LOG_PATH, p,
+                    "audit: requested log path is not writable; falling back to "
+                    "ephemeral /tmp storage. Fix wa-audit volume permissions.",
                 )
             return p
         except OSError as e:
-            log.warning("audit: candidate %s not writable: %s", p, e)
+            log.warning("audit: candidate path not writable (%s)", type(e).__name__)
     log.warning("audit: NO writable path found; audit will be skipped")
     return _AUDIT_FALLBACK
 
@@ -156,7 +155,7 @@ class ObservabilityMiddleware(Middleware):
                         f.flush()
                         os.fsync(f.fileno())
                 except OSError as e:
-                    log.warning("audit write failed: %s", e)
+                    log.warning("audit write failed (%s)", type(e).__name__)
 
 
 async def metrics_endpoint(_request):
