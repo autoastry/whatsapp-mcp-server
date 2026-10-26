@@ -88,3 +88,37 @@ uvx ruff@0.8 check .
 **Audit completed with limitations.** The repo already has substantial auth, scope enforcement, audit logging, deployment controls and tests for a single-owner/single-session service. The upgrade must extend these controls to a true user → owned accounts → independent WhatsApp sessions model, not replace the project or mistake multi-token MCP access for multi-user session isolation.
 
 **Next exact step:** Phase 1 — trace the complete client/session and all shared-data paths in a local checkout, then write the ownership and service-boundary design before modifying application code. Run the baseline commands above and attach their actual output to the implementation record.
+
+
+## Security hardening progress — 2026-10-26
+
+This appendix records repository changes made after the initial Phase 0 audit. It does not replace the phase gates above.
+
+### Verified in repository CI
+
+Latest inspected workflow run: [40301744496](https://github.com/autoastry/whatsapp-mcp-server/actions/runs/40301744496), for commit `40396fa41ece78be3f5a0fbb950a5349063964a1`.
+
+- Python lint and tests: passed; **250 tests passed**.
+- Go lint, tests, and build: passed.
+- Secret scan: passed.
+
+### Additional offline hardening in this branch
+
+- Reject malformed lifecycle status, role, and action values before registry membership checks; cover failed account creation and prevent callers from manufacturing bridge-owned lifecycle states.
+- Refuse registry initialization inside a database containing unrelated tables, and reject schemas newer than the application supports without creating tables. Close the SQLite connection when initialization fails.
+- Keep token transport identity distinct from platform principal identity; explicitly mapped principal resolution rejects missing, malformed, and ambiguous configuration.
+- Require every registered MCP tool to declare a scope policy; require every send/admin-scoped tool to have an audit policy.
+- Redact exception text and filesystem details from tool dispatch, audit logging, and chat/message/media resource errors.
+- Enforce read scope on the chat, message, and media resource handlers, with tests for read/full permission, send-only denial, absent request context, and safe error responses.
+
+### Remaining hard gates — not complete
+
+1. **Account ownership is still not enforced end-to-end.** `principal_mapping.py` and `account_authorization.py` are integration seams, not universal authorization at every tool/resource/bridge access.
+2. **No independent per-account WhatsApp sessions are implemented.** The existing Go bridge still uses its legacy shared client/device store and shared event lifecycle. Do not treat the registry as proof of runtime multi-session support.
+3. **Backup/restore rehearsal has not been executed.** The runbook is a procedure only. A deployment operator must run it against a disposable restore target and record evidence; this editing environment has no Docker daemon or deployment-volume access.
+4. **No live WhatsApp pairing, sending, or reconnect tests were run.** CI tests are repository tests, not proof of a live session or delivery behavior.
+5. **Branch divergence needs human review.** At the time of this update, the feature branch was reported 147 commits ahead and 2 commits behind `main`. Review the two main-only commits and reconcile safely before any merge; do not blindly merge or rebase over existing work.
+
+### Gate before starting Go runtime multi-session work
+
+Do not proceed to runtime session-manager implementation until the team has (a) reviewed branch divergence, (b) completed the disposable backup/restore rehearsal, (c) mapped all current database/cache/media/event consumers, and (d) approved the account ownership and internal bridge trust boundary. These are operational/design gates, not tasks that can be marked complete by adding unit tests alone.
