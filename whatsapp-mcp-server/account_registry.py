@@ -240,7 +240,11 @@ class AccountRegistry:
         status: str = "pending_pairing",
     ) -> str:
         owner = self._required_id(owner_principal_id, "owner_principal_id")
-        account = self._required_id(account_id, "account_id") if account_id else str(uuid.uuid4())
+        account = (
+            self._required_id(account_id, "account_id")
+            if account_id is not None
+            else str(uuid.uuid4())
+        )
         if status not in ACCOUNT_STATUSES:
             raise ValueError("Invalid account status")
         with self._lock:
