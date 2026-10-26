@@ -15,6 +15,22 @@ from typing import Any
 log = logging.getLogger("whatsapp_mcp.res")
 
 
+def _require_resource_read_scope() -> None:
+    """Fail closed: resource reads need read scope, not only transport auth."""
+    from fastmcp.exceptions import ToolError
+    from fastmcp.server.dependencies import get_access_token
+
+    try:
+        token = get_access_token()
+    except Exception as exc:
+        raise ToolError("Unable to resolve authenticated caller") from exc
+    if token is None:
+        raise ToolError("Authenticated caller context is missing")
+    scopes = list(getattr(token, "scopes", []) or [])
+    if "whatsapp:full" not in scopes and "whatsapp:read" not in scopes:
+        raise ToolError("Insufficient scope: resource requires 'whatsapp:read'")
+
+
 def register(mcp) -> None:
     from whatsapp import (
         get_chat as _get_chat,
@@ -32,6 +48,7 @@ def register(mcp) -> None:
         mime_type="application/json",
     )
     def chat_resource(chat_jid: str) -> str:
+        _require_resource_read_scope()
         chat = _get_chat(chat_jid, include_last_message=True)
         msgs = _list_messages(chat_jid=chat_jid, limit=20, include_context=False)
         # dataclasses -> dict
@@ -53,6 +70,7 @@ def register(mcp) -> None:
         mime_type="application/json",
     )
     def message_resource(message_id: str, chat_jid: str) -> str:
+        _require_resource_read_scope()
         from whatsapp import get_message_context as _get_ctx
         try:
             ctx = _get_ctx(message_id, before=0, after=0)
@@ -72,6 +90,7 @@ def register(mcp) -> None:
     )
     def media_resource(message_id: str, chat_jid: str) -> dict[str, Any]:
         """Returns a BlobResourceContents payload."""
+        _require_resource_read_scope()
         try:
             info = _fetch_media(message_id, chat_jid)
         except MediaError as e:
