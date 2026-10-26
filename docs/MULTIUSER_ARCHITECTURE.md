@@ -356,3 +356,12 @@ A principal marked `disabled` is denied by the registry while disabled, but the 
 The current isolated registry has no ownership-transfer or audited break-glass recovery operation. Disabling an account's sole owner can therefore leave its account without an active manager until that owner is re-enabled. Do not wire principal disablement into a user-deletion workflow or permit irreversible account-owner deactivation until an audited ownership-transfer/recovery design exists. That design must prevent self-approval, preserve account/session ownership history, and make the transfer atomic.
 
 This is a known pre-integration limitation, not a claim that production account recovery is implemented.
+
+
+## 17. MCP resources and signed-media tenant boundary
+
+The chat, message, and media MCP resource handlers now explicitly require `whatsapp:read` (or `whatsapp:full`) and return generic errors instead of exposing downstream exception text. Offline tests cover missing auth context, send-only tokens, read/full tokens, and redaction of bridge/local file errors.
+
+This closes only the transport-scope gap. The current signed media URL payload carries message ID, chat JID, filename, and expiry; the signing key is derived from the legacy bearer token or the first token in the multi-token configuration. The short-link database and media directory are shared. There is no account ID or principal authorization in the signed claims/short-link records today. These links are bearer capabilities until expiry, so anyone who receives one can use it.
+
+Before multi-user production use, media URL issuance must verify the caller's trusted principal and account grant; claims and short-link records must bind to an internal account ID; media caches must be partitioned by account; and signing-key rotation/revocation semantics must be explicit. A valid HMAC alone is not proof that the current requester owns the referenced account. Do not claim tenant isolation for media or resources until this design is implemented and cross-account negative tests pass.
