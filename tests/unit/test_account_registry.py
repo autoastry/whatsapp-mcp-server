@@ -12,11 +12,24 @@ def registry(tmp_path):
     value.close()
 
 
+def _create_account_in_state(registry, owner: str, account_id: str, status: str):
+    """Seed bridge-confirmed states directly for policy tests; never production code."""
+    import sqlite3
+
+    account = registry.create_account(owner, account_id)
+    if status != "pending_pairing":
+        with sqlite3.connect(registry.db_path) as db:
+            db.execute(
+                "UPDATE whatsapp_accounts SET status = ? WHERE account_id = ?",
+                (status, account),
+            )
+    return account
+
+
 def pair(registry):
     registry.create_principal("alice")
     registry.create_principal("bob")
-    account = registry.create_account("alice", "account-a", "active")
-    return account
+    return _create_account_in_state(registry, "alice", "account-a", "active")
 
 
 def test_owner_access_and_foreign_account_denial(registry):
@@ -73,7 +86,7 @@ def test_unknown_principal_cannot_create_account(registry):
 )
 def test_account_lifecycle_state_gates_actions(registry, status, allowed, denied):
     registry.create_principal("alice")
-    account = registry.create_account("alice", f"account-{status}", status)
+    account = _create_account_in_state(registry, "alice", f"account-{status}", status)
     for action in allowed:
         registry.require_account_access("alice", account, action)
     for action in denied:
@@ -86,7 +99,7 @@ def test_registry_grants_survive_close_and_reopen(tmp_path):
     first = AccountRegistry(db_path)
     first.create_principal("alice")
     first.create_principal("bob")
-    account = first.create_account("alice", "account-persistent", "active")
+    account = _create_account_in_state(first, "alice", "account-persistent", "active")
     first.grant_access("alice", "bob", account, "operator")
     first.close()
 
@@ -153,7 +166,7 @@ def test_duplicate_account_creation_rolls_back_without_granting_foreign_access(r
 
     registry.create_principal("alice")
     registry.create_principal("bob")
-    account = registry.create_account("alice", "shared-id", "active")
+    account = _create_account_in_state(registry, "alice", "shared-id", "active")
 
     with pytest.raises(sqlite3.IntegrityError):
         registry.create_account("bob", "shared-id", "active")
@@ -162,7 +175,7 @@ def test_duplicate_account_creation_rolls_back_without_granting_foreign_access(r
     with pytest.raises(AuthorizationDenied):
         registry.require_account_access("bob", account, "read")
 
-    bob_account = registry.create_account("bob", "bob-account", "active")
+    bob_account = _create_account_in_state(registry, "bob", "bob-account", "active")
     registry.require_account_access("bob", bob_account, "manage")
 
 
@@ -228,7 +241,7 @@ def test_separate_registry_connections_serialize_concurrent_grant_changes(tmp_pa
     try:
         first.create_principal("alice")
         first.create_principal("bob")
-        account = first.create_account("alice", "concurrent-account", "active")
+        account = _create_account_in_state(first, "alice", "concurrent-account", "active")
 
         def grant_many():
             for index in range(20):
@@ -270,7 +283,7 @@ def test_revoked_account_cannot_be_reactivated_through_owner_grant(registry):
     account = pair(registry)
     registry.set_account_status("alice", account, "revoked")
 
-    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+    with pytest.raises(ValueError, match="controlled by bridge lifecycle"):
         registry.set_account_status("alice", account, "active")
     with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
         registry.require_account_access("alice", account, "manage")
@@ -485,3 +498,22 @@ def test_account_creation_rejects_wrong_status_types_and_values(
     with sqlite3.connect(registry.db_path) as db:
         accounts = db.execute("SELECT account_id FROM whatsapp_accounts").fetchall()
     assert accounts == []
+
+
+@pytest.mark.parametrize("non_initial_status", ["active", "disconnected", "revoked", "error"])
+def test_account_creation_cannot_forge_bridge_lifecycle_state(
+    registry, non_initial_status
+):
+    registry.create_principal("alice")
+    with pytest.raises(ValueError, match="must start in pending_pairing"):
+        registry.create_account("alice", "forged-state-account", non_initial_status)
+
+
+@pytest.mark.parametrize("bridge_owned_status", ["active", "pending_pairing", "error"])
+def test_owner_cannot_manufacture_bridge_owned_account_states(
+    registry, bridge_owned_status
+):
+    account = pair(registry)
+    with pytest.raises(ValueError, match="controlled by bridge lifecycle"):
+        registry.set_account_status("alice", account, bridge_owned_status)
+    registry.require_account_access("alice", account, "send")
