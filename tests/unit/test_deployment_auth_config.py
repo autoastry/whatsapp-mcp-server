@@ -44,7 +44,7 @@ def _compose_service_block(compose: str, service_name: str, next_service: str) -
 def test_bridge_rest_api_is_not_published_to_host_and_mcp_is_loopback_only():
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     bridge = _compose_service_block(compose, "bridge", "mcp")
-    mcp = _compose_service_block(compose, "mcp", "# Docker never restarts")
+    mcp = _compose_service_block(compose, "mcp", "autoheal")
 
     bridge_keys = {
         line.strip()
