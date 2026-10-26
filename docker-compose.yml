@@ -1,7 +1,7 @@
 # Private WhatsApp MCP - bridge (Go) + mcp (Python), private net, loopback only.
 #
 #   bridge : holds the WhatsApp connection, writes SQLite, internal REST API :8080
-#   mcp    : FastMCP over Streamable HTTP at /mcp, owner-token auth, on 127.0.0.1:9100
+#   mcp    : FastMCP over Streamable HTTP at /mcp, bearer tokens + scopes, on 127.0.0.1:9100
 #
 # The bridge port is NEVER published to a public interface (uses `expose`, so it's
 # reachable only by the mcp container over the `wa` network). Only the mcp port is
