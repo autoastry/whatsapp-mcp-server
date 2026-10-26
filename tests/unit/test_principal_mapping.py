@@ -58,3 +58,27 @@ def test_mapping_does_not_treat_client_id_as_principal_by_default():
     assert resolve_principal_id("known-client", mapping) == "stable-principal"
     with pytest.raises(PrincipalMappingError):
         resolve_principal_id("stable-principal", mapping)
+
+
+def test_client_ids_that_collide_after_whitespace_normalization_are_rejected():
+    with pytest.raises(PrincipalMappingError, match="Duplicate client ID"):
+        parse_principal_mapping(
+            '{"client-a":"owner-a"," client-a ":"owner-b"}'
+        )
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [
+        {"known-client": ""},
+        {"known-client": "   "},
+        {"known-client": None},
+        {"known-client": []},
+        {},
+    ],
+)
+def test_invalid_resolved_principal_mapping_fails_closed(mapping):
+    with pytest.raises(
+        PrincipalMappingError, match="Authenticated principal unavailable"
+    ):
+        resolve_principal_id("known-client", mapping)
