@@ -257,12 +257,12 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://your-host/mcp \
 
 ## Configuration
 
-Everything is environment variables. The only required one is the token.
+Everything is configured through environment variables. Set either the legacy single token or the multi-token JSON list; the server refuses to start if neither is configured.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `WHATSAPP_MCP_TOKEN` | *(required)* | The single owner bearer token |
-| `WHATSAPP_MCP_TOKENS_JSON` | unset | Multiple tokens with per-token scopes |
+| `WHATSAPP_MCP_TOKEN` | unset | Legacy single bearer token with full scope; optional when multi-token mode is used |
+| `WHATSAPP_MCP_TOKENS_JSON` | unset | JSON array of token/client ID/scope entries; required if the legacy token is unset |
 | `WHATSAPP_MCP_TOOLSET` | `minimal` | `minimal` (29 + meta) or `full` (96) |
 | `WHATSAPP_MEDIA_ROOTS` | `/tmp/wamcp-media` | Extra dirs a send tool may read from (colon-separated); the built-in media dir is always allowed |
 | `WHATSAPP_MCP_AUDIT_LOG` | `/tmp/wamcp-audit.jsonl` | Append-only audit trail (the compose file overrides this to `/var/log/wamcp/audit.jsonl`) |
@@ -275,13 +275,26 @@ Everything is environment variables. The only required one is the token.
 
 ### Scopes
 
-With `WHATSAPP_MCP_TOKENS_JSON` each token carries scopes, enforced per tool:
+With `WHATSAPP_MCP_TOKENS_JSON`, configure a JSON **array** (not an object keyed by client ID):
 
-`whatsapp:read` · `whatsapp:send` · `whatsapp:admin` · `whatsapp:full`
+```json
+[
+  {"token":"<secret>","client_id":"reader-app","scopes":["whatsapp:read"]},
+  {"token":"<secret>","client_id":"sender-app","scopes":["whatsapp:read","whatsapp:send"]}
+]
+```
 
-A read-only token confines a summarising agent to reading and cannot send. The
-enforcement applies to `call_tool` dispatch as well as to direct calls, so the
-retrieval layer cannot be used to reach a tool the token's scope forbids.
+Scopes are `whatsapp:read`, `whatsapp:send`, `whatsapp:admin`, and `whatsapp:full`.
+A read-only token cannot send. The enforcement applies to `call_tool` dispatch as
+well as direct calls, and MCP resource reads require read or full scope. If both
+auth settings are present, both credential sets are registered; the legacy token
+has full scope. Tokens and client IDs must be unique.
+
+**Important:** token scopes are not account ownership. The current bridge, message
+database, scheduler, caches, and media storage are not fully account-partitioned,
+and the principal mapping/registry are not wired into every tool. Multi-token
+authentication alone does not make this deployment safe for multiple independent
+users.
 
 ---
 
