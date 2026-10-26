@@ -143,7 +143,7 @@ class AccountRegistry:
                     (row["from"], row["table"], row["to"])
                     for row in self._db.execute("PRAGMA foreign_key_list(account_ownership)")
                 }
-                if not _REQUIRED_OWNERSHIP_FOREIGN_KEYS <= foreign_keys:
+                if not foreign_keys >= _REQUIRED_OWNERSHIP_FOREIGN_KEYS:
                     raise RuntimeError(
                         "Registry database contains a malformed table; refusing to initialize"
                     )
