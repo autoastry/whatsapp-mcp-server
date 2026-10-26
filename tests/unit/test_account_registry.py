@@ -413,3 +413,18 @@ def test_registry_refuses_ownership_table_without_foreign_keys(tmp_path):
         "whatsapp_accounts",
         "account_ownership",
     }
+
+
+@pytest.mark.parametrize("invalid_account_id", ["", "   "])
+def test_explicit_blank_account_id_is_rejected_without_creating_account(
+    registry, invalid_account_id
+):
+    registry.create_principal("alice")
+
+    with pytest.raises(ValueError, match="account_id must be a non-empty string"):
+        registry.create_account("alice", invalid_account_id)
+
+    # A rejected explicit identifier must not silently create an unrelated UUID.
+    with registry._lock:
+        rows = registry._db.execute("SELECT account_id FROM whatsapp_accounts").fetchall()
+    assert rows == []
