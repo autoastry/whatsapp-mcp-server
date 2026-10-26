@@ -144,3 +144,29 @@ def test_every_send_or_admin_scoped_tool_is_audited():
         "Mutating tools missing audit policy: "
         f"{sorted(mutating - observability.AUDIT_MUTATING_TOOLS)}"
     )
+
+
+def test_observability_audit_write_failure_redacts_exception_text(
+    monkeypatch, caplog
+):
+    from pathlib import Path
+
+    monkeypatch.setattr(observability, "AUDIT_LOG_PATH", Path("/unwritable/audit.jsonl"))
+
+    def fail_open(*args, **kwargs):
+        raise OSError("token=secret-token and private message body")
+
+    monkeypatch.setattr(Path, "open", fail_open)
+
+    async def call_next(_context):
+        return "ok"
+
+    result = asyncio.run(
+        observability.ObservabilityMiddleware().on_call_tool(
+            _context("send_message"), call_next
+        )
+    )
+    assert result == "ok"
+    assert "secret-token" not in caplog.text
+    assert "private message body" not in caplog.text
+    assert "OSError" in caplog.text
