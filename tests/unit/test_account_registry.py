@@ -255,3 +255,22 @@ def test_separate_registry_connections_serialize_concurrent_grant_changes(tmp_pa
     finally:
         first.close()
         second.close()
+
+
+def test_failed_foreign_lifecycle_change_does_not_mutate_account(registry):
+    account = pair(registry)
+    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+        registry.set_account_status("bob", account, "disconnected")
+
+    # The denied attempt must leave the active account usable for its owner.
+    registry.require_account_access("alice", account, "send")
+
+
+def test_revoked_account_cannot_be_reactivated_through_owner_grant(registry):
+    account = pair(registry)
+    registry.set_account_status("alice", account, "revoked")
+
+    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+        registry.set_account_status("alice", account, "active")
+    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+        registry.require_account_access("alice", account, "manage")
