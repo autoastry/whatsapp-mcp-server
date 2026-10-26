@@ -285,7 +285,7 @@ def test_registry_refuses_malformed_known_table_without_partial_ddl(tmp_path):
             "CREATE TABLE schema_migrations "
             "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
         )
-        db.execute("INSERT INTO schema_migrations(version) VALUES (1)")
+        db.execute("INSERT INTO schema_migrations(version, applied_at) VALUES (1, 'fixture')")
         db.execute("CREATE TABLE whatsapp_accounts (account_id TEXT PRIMARY KEY)")
 
     with pytest.raises(RuntimeError, match="malformed table"):
@@ -311,7 +311,7 @@ def test_registry_refuses_known_columns_without_required_primary_key(tmp_path):
             "CREATE TABLE schema_migrations "
             "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
         )
-        db.execute("INSERT INTO schema_migrations(version) VALUES (1)")
+        db.execute("INSERT INTO schema_migrations(version, applied_at) VALUES (1, 'fixture')")
         db.execute(
             "CREATE TABLE whatsapp_accounts "
             "(account_id TEXT, status TEXT, created_at TEXT, updated_at TEXT)"
