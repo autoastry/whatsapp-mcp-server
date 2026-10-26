@@ -169,7 +169,7 @@ def test_duplicate_account_creation_rolls_back_without_granting_foreign_access(r
     account = _create_account_in_state(registry, "alice", "shared-id", "active")
 
     with pytest.raises(sqlite3.IntegrityError):
-        registry.create_account("bob", "shared-id", "active")
+        registry.create_account("bob", "shared-id")
 
     registry.require_account_access("alice", account, "manage")
     with pytest.raises(AuthorizationDenied):
