@@ -152,3 +152,48 @@ def test_media_resource_redacts_media_error_text(monkeypatch, caplog):
     assert "secret-token" not in caplog.text
     assert "internal.example" not in caplog.text
     assert "secret-token" not in str(body)
+
+
+def test_chat_resource_redacts_downstream_exception_text(monkeypatch, caplog):
+    import whatsapp
+
+    from fastmcp.exceptions import ToolError
+
+    _read_scoped_token(monkeypatch)
+
+    def fail_get_chat(*args, **kwargs):
+        raise RuntimeError("https://internal.example/token=secret-token")
+
+    monkeypatch.setattr(whatsapp, "get_chat", fail_get_chat)
+    registry = _ResourceRegistry()
+    resources.register(registry)
+
+    with pytest.raises(ToolError, match="Unable to read chat resource"):
+        registry.handlers["chat_resource"]("chat-jid")
+    assert "secret-token" not in caplog.text
+    assert "internal.example" not in caplog.text
+
+
+def test_media_resource_redacts_local_file_read_exception(monkeypatch, caplog):
+    import json
+    import media
+
+    _read_scoped_token(monkeypatch)
+
+    class FailingPath:
+        def read_bytes(self):
+            raise OSError("token=secret-token local=/private/messages")
+
+    monkeypatch.setattr(
+        media,
+        "fetch_media",
+        lambda *args, **kwargs: {"path": FailingPath(), "mime": "image/png"},
+    )
+    registry = _ResourceRegistry()
+    resources.register(registry)
+
+    result = registry.handlers["media_resource"]("message-id", "chat-jid")
+    body = json.loads(result["blob"].decode())
+    assert body == {"error": "Unable to read media resource"}
+    assert "secret-token" not in caplog.text
+    assert "/private/messages" not in caplog.text
