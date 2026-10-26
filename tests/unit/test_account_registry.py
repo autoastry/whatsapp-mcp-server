@@ -274,3 +274,29 @@ def test_revoked_account_cannot_be_reactivated_through_owner_grant(registry):
         registry.set_account_status("alice", account, "active")
     with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
         registry.require_account_access("alice", account, "manage")
+
+
+def test_registry_refuses_malformed_known_table_without_partial_ddl(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "malformed-registry.db"
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "CREATE TABLE schema_migrations "
+            "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+        )
+        db.execute("INSERT INTO schema_migrations(version) VALUES (1)")
+        db.execute("CREATE TABLE whatsapp_accounts (account_id TEXT PRIMARY KEY)")
+
+    with pytest.raises(RuntimeError, match="malformed table"):
+        AccountRegistry(db_path)
+
+    with sqlite3.connect(db_path) as db:
+        tables = {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+    assert tables == {"schema_migrations", "whatsapp_accounts"}
