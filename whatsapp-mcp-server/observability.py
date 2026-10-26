@@ -59,6 +59,12 @@ AUDIT_MUTATING_TOOLS = {
     # DESTRUCTIVE
     "edit_message", "delete_message", "block_user", "update_group_participants",
     "leave_group",
+    # Mutating tools added after the original audit list.
+    "mute_chat", "pin_chat", "star_message", "post_status", "forward_message",
+    "set_chat_note", "send_sticker", "vote_in_poll", "backfill_group_participants",
+    "archive_chat", "mark_chat_unread", "set_status_message", "edit_label",
+    "set_chat_label", "set_message_label", "schedule_message", "save_draft",
+    "send_draft", "cancel_scheduled", "delete_draft", "delete_chat",
 }
 
 _AUDIT_FALLBACK = Path("/tmp/wamcp-audit.jsonl")
