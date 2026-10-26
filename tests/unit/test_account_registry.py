@@ -217,3 +217,41 @@ def test_grant_cannot_downgrade_existing_account_owner(registry):
     registry.require_account_access("alice", account, "manage")
     registry.grant_access("alice", "bob", account, "reader")
     registry.require_account_access("bob", account, "read")
+
+
+def test_separate_registry_connections_serialize_concurrent_grant_changes(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    db_path = tmp_path / "concurrent-registry.db"
+    first = AccountRegistry(db_path)
+    second = AccountRegistry(db_path)
+    try:
+        first.create_principal("alice")
+        first.create_principal("bob")
+        account = first.create_account("alice", "concurrent-account", "active")
+
+        def grant_many():
+            for index in range(20):
+                first.grant_access(
+                    "alice", "bob", account, "reader" if index % 2 == 0 else "operator"
+                )
+
+        def revoke_many():
+            for _ in range(20):
+                second.revoke_access("alice", "bob", account)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(grant_many), pool.submit(revoke_many)]
+            for future in futures:
+                future.result(timeout=15)
+
+        # Regardless of the final ordering of grant/revoke, the owner record
+        # remains authoritative and no partial transaction damages the registry.
+        first.require_account_access("alice", account, "manage")
+        first.grant_access("alice", "bob", account, "reader")
+        first.require_account_access("bob", account, "read")
+        with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+            first.require_account_access("bob", account, "send")
+    finally:
+        first.close()
+        second.close()
