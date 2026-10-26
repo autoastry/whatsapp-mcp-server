@@ -475,20 +475,24 @@ def _enforce_scope(name: str) -> None:
     """Replicate observability.AuthzMiddleware for an internally dispatched tool.
     Without this, call_tool('delete_message', ...) would skip the per-tool scope
     check that a direct delete_message call is subject to."""
+    from fastmcp.exceptions import ToolError
     try:
         from observability import TOOL_SCOPES
-    except Exception:
-        return
+    except Exception as exc:
+        # Policy configuration is security-critical: never silently allow a
+        # dispatch because its import failed.
+        raise ToolError("Authorization policy is unavailable") from exc
     needed = TOOL_SCOPES.get(name)
     if not needed:
-        return
-    from fastmcp.exceptions import ToolError
+        raise ToolError(f"Authorization policy missing for tool '{name}'")
     from fastmcp.server.dependencies import get_access_token
     try:
         tok = get_access_token()
-    except Exception:
-        tok = None
-    scopes = list(getattr(tok, "scopes", []) or []) if tok else []
+    except Exception as exc:
+        raise ToolError("Unable to resolve authenticated caller") from exc
+    if tok is None:
+        raise ToolError("Authenticated caller context is missing")
+    scopes = list(getattr(tok, "scopes", []) or [])
     if "whatsapp:full" not in scopes and needed not in scopes:
         raise ToolError(
             f"Insufficient scope: tool '{name}' requires '{needed}'; "
@@ -504,9 +508,14 @@ def _audit(name: str, args: Any, outcome: str, ms: float) -> None:
         from observability import AUDIT_LOG_PATH, AUDIT_MUTATING_TOOLS, _safe_args_hash
         if name not in AUDIT_MUTATING_TOOLS:
             return
+        try:
+            from auth_identity import audit_client_id_or_unknown
+            client_id = audit_client_id_or_unknown()
+        except Exception:
+            client_id = "unknown"
         row = {
             "ts": time.time(),
-            "client_id": "owner",
+            "client_id": client_id,
             "tool": name,
             "args_hash": _safe_args_hash(args),
             "outcome": outcome,
@@ -517,8 +526,10 @@ def _audit(name: str, args: Any, outcome: str, ms: float) -> None:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
             f.flush()
             os.fsync(f.fileno())
-    except Exception:
-        log.warning("call_tool audit failed for %s", name, exc_info=True)
+    except Exception as exc:
+        # Audit failures must be visible, but exception strings/tracebacks can
+        # contain filesystem details or data from downstream integrations.
+        log.warning("call_tool audit failed for %s (%s)", name, type(exc).__name__)
 
 
 _FIND_DESC = (
@@ -618,10 +629,12 @@ def register(mcp) -> None:
         except Exception as e:
             outcome = "error"
             _audit(name, args, outcome, (time.perf_counter() - start) * 1000)
-            # Surface a helpful, structured error instead of a bare 500 so the
-            # model can correct its arguments and retry.
+            # Do not return exception text: downstream tools can include tokens,
+            # message content, local paths, or service URLs in exception details.
+            # Keep logs similarly low-detail to avoid leaking those values.
+            log.warning("call_tool dispatch failed for %s (%s)", name, type(e).__name__)
             return {
-                "error": f"{type(e).__name__}: {e}",
+                "error": "Tool execution failed; check arguments and retry.",
                 "tool": name,
                 "expected_params": _sig(getattr(tool, "parameters", None)),
                 "hint": "check arguments against expected_params, then retry",

@@ -1,7 +1,7 @@
 # Private WhatsApp MCP - bridge (Go) + mcp (Python), private net, loopback only.
 #
 #   bridge : holds the WhatsApp connection, writes SQLite, internal REST API :8080
-#   mcp    : FastMCP over Streamable HTTP at /mcp, owner-token auth, on 127.0.0.1:9100
+#   mcp    : FastMCP over Streamable HTTP at /mcp, bearer tokens + scopes, on 127.0.0.1:9100
 #
 # The bridge port is NEVER published to a public interface (uses `expose`, so it's
 # reachable only by the mcp container over the `wa` network). Only the mcp port is
@@ -69,7 +69,10 @@ services:
     cpus: "0.5"
     depends_on: [bridge]
     environment:
-      WHATSAPP_MCP_TOKEN: ${WHATSAPP_MCP_TOKEN:?set WHATSAPP_MCP_TOKEN in .env}
+      # Set either the legacy single token or a JSON list of scoped tokens.
+      # The application refuses to start if neither configuration is present.
+      WHATSAPP_MCP_TOKEN: ${WHATSAPP_MCP_TOKEN:-}
+      WHATSAPP_MCP_TOKENS_JSON: ${WHATSAPP_MCP_TOKENS_JSON:-}
       WHATSAPP_API_BASE_URL: http://bridge:8080/api
       MESSAGES_DB_PATH: /data/store/messages.db
       WHATSAPP_MCP_LOG_LEVEL: ${WHATSAPP_MCP_LOG_LEVEL:-INFO}

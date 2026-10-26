@@ -1,0 +1,16 @@
+# SLSA Go builder configuration for the existing WhatsApp bridge.
+# Keep this aligned with .github/workflows/ci.yml: sqlite_fts5 is required
+# by the bridge at startup. This produces a Linux amd64 binary.
+version: 1
+
+env:
+  - CGO_ENABLED=1
+
+flags:
+  - -trimpath
+  - -tags=sqlite_fts5
+
+goos: linux
+goarch: amd64
+dir: ./whatsapp-bridge
+binary: whatsapp-bridge-{{ .Os }}-{{ .Arch }}

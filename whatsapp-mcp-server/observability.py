@@ -59,6 +59,12 @@ AUDIT_MUTATING_TOOLS = {
     # DESTRUCTIVE
     "edit_message", "delete_message", "block_user", "update_group_participants",
     "leave_group",
+    # Mutating tools added after the original audit list.
+    "mute_chat", "pin_chat", "star_message", "post_status", "forward_message",
+    "set_chat_note", "send_sticker", "vote_in_poll", "backfill_group_participants",
+    "archive_chat", "mark_chat_unread", "set_status_message", "edit_label",
+    "set_chat_label", "set_message_label", "schedule_message", "save_draft",
+    "send_draft", "cancel_scheduled", "delete_draft", "delete_chat",
 }
 
 _AUDIT_FALLBACK = Path("/tmp/wamcp-audit.jsonl")
@@ -85,13 +91,12 @@ def _pick_audit_path() -> Path:
                 f.write("")
             if p != AUDIT_LOG_PATH:
                 log.warning(
-                    "audit: requested path %s is not writable; falling back to %s "
-                    "(ephemeral). Fix by chowning the wa-audit volume to uid 10001.",
-                    AUDIT_LOG_PATH, p,
+                    "audit: requested log path is not writable; falling back to "
+                    "ephemeral /tmp storage. Fix wa-audit volume permissions.",
                 )
             return p
         except OSError as e:
-            log.warning("audit: candidate %s not writable: %s", p, e)
+            log.warning("audit: candidate path not writable (%s)", type(e).__name__)
     log.warning("audit: NO writable path found; audit will be skipped")
     return _AUDIT_FALLBACK
 
@@ -114,7 +119,12 @@ class ObservabilityMiddleware(Middleware):
     async def on_call_tool(self, context: MiddlewareContext, call_next):
         start = time.perf_counter()
         tool_name = getattr(context.message, "name", "unknown")
-        client_id = "owner"  # single-token deployment; will gain per-client when G11 lands
+        try:
+            from auth_identity import audit_client_id_or_unknown
+            client_id = audit_client_id_or_unknown()
+        except Exception:
+            # Audit must not break tool execution; unknown is safer than false attribution.
+            client_id = "unknown"
         outcome = "ok"
         try:
             result = await call_next(context)
@@ -145,7 +155,7 @@ class ObservabilityMiddleware(Middleware):
                         f.flush()
                         os.fsync(f.fileno())
                 except OSError as e:
-                    log.warning("audit write failed: %s", e)
+                    log.warning("audit write failed (%s)", type(e).__name__)
 
 
 async def metrics_endpoint(_request):
@@ -219,6 +229,49 @@ TOOL_SCOPES: dict[str, str] = {
     "block_user": "whatsapp:admin",
     "leave_group": "whatsapp:admin",
     "update_group_participants": "whatsapp:admin",
+    "get_bridge_diagnostics": "whatsapp:read",
+    "sender_activity": "whatsapp:read",
+    "list_all_media_by_type": "whatsapp:read",
+    "search_by_reaction": "whatsapp:read",
+    "get_replies_to": "whatsapp:read",
+    "get_message_thread": "whatsapp:read",
+    "groups_with_member": "whatsapp:read",
+    "list_group_members": "whatsapp:read",
+    "get_reactions_on": "whatsapp:read",
+    "get_chat_stats": "whatsapp:read",
+    "get_top_active_chats": "whatsapp:read",
+    "get_quiet_chats": "whatsapp:read",
+    "count_messages": "whatsapp:read",
+    "messages_by_day": "whatsapp:read",
+    "export_chat": "whatsapp:read",
+    "list_nonspeech_voices": "whatsapp:read",
+    "resolve_identity": "whatsapp:read",
+    "list_person_messages": "whatsapp:read",
+    "get_bridge_stats": "whatsapp:read",
+    "get_media_info": "whatsapp:read",
+    "list_chats_by_state": "whatsapp:read",
+    "list_scheduled": "whatsapp:read",
+    "list_drafts": "whatsapp:read",
+    "get_chat_note": "whatsapp:read",
+    "set_chat_note": "whatsapp:send",
+    "list_chat_notes": "whatsapp:read",
+    "send_sticker": "whatsapp:send",
+    "vote_in_poll": "whatsapp:send",
+    "backfill_group_participants": "whatsapp:send",
+    "archive_chat": "whatsapp:send",
+    "mark_chat_unread": "whatsapp:send",
+    "set_status_message": "whatsapp:send",
+    "edit_label": "whatsapp:send",
+    "set_chat_label": "whatsapp:send",
+    "set_message_label": "whatsapp:send",
+    "schedule_message": "whatsapp:send",
+    "save_draft": "whatsapp:send",
+    "send_draft": "whatsapp:send",
+    "cancel_scheduled": "whatsapp:admin",
+    "delete_draft": "whatsapp:admin",
+    "delete_chat": "whatsapp:admin",
+    "find_tool": "whatsapp:read",
+    "call_tool": "whatsapp:authenticated",
 }
 
 
@@ -228,15 +281,20 @@ class AuthzMiddleware(Middleware):
     async def on_call_tool(self, context: MiddlewareContext, call_next):
         tool_name = getattr(context.message, "name", "")
         needed = TOOL_SCOPES.get(tool_name)
-        if needed:
-            try:
-                tok = get_access_token()
-            except Exception:
-                tok = None
-            scopes = list(getattr(tok, "scopes", []) or []) if tok else []
-            if "whatsapp:full" not in scopes and needed not in scopes:
-                raise ToolError(
-                    f"Insufficient scope: tool '{tool_name}' requires '{needed}'; "
-                    f"caller has {scopes or ['(none)']}"
-                )
+        if not needed:
+            # A newly registered or misspelled tool must never inherit access
+            # merely because its policy entry was forgotten.
+            raise ToolError(f"Authorization policy missing for tool '{tool_name}'")
+        try:
+            tok = get_access_token()
+        except Exception as exc:
+            raise ToolError("Unable to resolve authenticated caller") from exc
+        scopes = list(getattr(tok, "scopes", []) or []) if tok else []
+        if not tok:
+            raise ToolError("Authenticated caller context is missing")
+        if "whatsapp:full" not in scopes and needed not in scopes:
+            raise ToolError(
+                f"Insufficient scope: tool '{tool_name}' requires '{needed}'; "
+                f"caller has {scopes or ['(none)']}"
+            )
         return await call_next(context)

@@ -1,11 +1,14 @@
 """Authenticated HTTP entrypoint for the WhatsApp MCP server.
 
-Serves the WhatsApp tools over Streamable HTTP at /mcp, gated by a single
-owner bearer token. Only ONE principal exists: the owner. Every request must
-carry `Authorization: Bearer <WHATSAPP_MCP_TOKEN>`; anything else -> 401.
+Serves MCP tools over Streamable HTTP at /mcp. Transport authentication accepts
+one or more statically configured bearer tokens, each mapped to a configured
+client_id and tool scopes. Per-tool scopes are enforced at dispatch.
 
-We use FastMCP v2's built-in StaticTokenVerifier (no custom verifier needed)
-keyed on exactly one token read from the environment.
+Important boundary: a verified token client_id is not automatically a platform
+principal, and the account registry / client-to-principal mapping are not yet
+wired into every tool and bridge operation. This entrypoint therefore does not
+by itself provide end-to-end multi-user account isolation. Do not expose it as
+a multi-tenant production service until that integration and its tests exist.
 
 Run (production, behind nginx on loopback):
     gunicorn server:asgi_app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:9000 -w 2
@@ -20,7 +23,6 @@ import os
 
 from fastmcp import FastMCP
 from fastmcp.server.auth import StaticTokenVerifier
-from fastmcp.server.middleware.caching import ResponseCachingMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -39,34 +41,68 @@ log = logging.getLogger("whatsapp_mcp")
 import json as _json
 
 # N7 + G11: multi-token registry with per-token scopes.
-# The classic path (single WHATSAPP_MCP_TOKEN with scopes:["whatsapp:full"])
-# still works. To use per-tool scopes, set WHATSAPP_MCP_TOKENS_JSON with a
-# JSON array like:
-#   [{"token":"abc...", "client_id":"myphone", "scopes":["whatsapp:read","whatsapp:send"]},
-#    {"token":"def...", "client_id":"biscript", "scopes":["whatsapp:read"]}]
-# Scopes recognized: whatsapp:read, whatsapp:send, whatsapp:admin, whatsapp:full
-# (whatsapp:full = superset of all three).
+# Configuration is deliberately strict: silently skipping or overwriting an
+# entry can grant an unintended identity or permission set.
+_ALLOWED_SCOPES = {
+    "whatsapp:read", "whatsapp:send", "whatsapp:admin", "whatsapp:full",
+}
 _TOKENS: dict[str, dict] = {}
+_CLIENT_IDS: set[str] = set()
+
+
+def _register_token(token: str, client_id: str, scopes: list[str]) -> None:
+    """Validate and register one credential without silent overwrite."""
+    token = token.strip()
+    client_id = client_id.strip()
+    if not token:
+        raise SystemExit("Token configuration contains an empty token.")
+    if not client_id:
+        raise SystemExit("Token configuration contains an empty client_id.")
+    if token in _TOKENS:
+        raise SystemExit("Token configuration contains a duplicate token.")
+    if client_id in _CLIENT_IDS:
+        raise SystemExit(f"Token configuration contains duplicate client_id: {client_id!r}.")
+    if not scopes or any(not isinstance(scope, str) or not scope.strip() for scope in scopes):
+        raise SystemExit(f"Token {client_id!r} must have a non-empty list of scopes.")
+    if len(scopes) != len(set(scopes)):
+        raise SystemExit(f"Token {client_id!r} contains duplicate scopes.")
+    unknown = sorted(set(scopes) - _ALLOWED_SCOPES)
+    if unknown:
+        raise SystemExit(f"Token {client_id!r} has unsupported scopes: {unknown!r}.")
+    _TOKENS[token] = {"client_id": client_id, "scopes": scopes}
+    _CLIENT_IDS.add(client_id)
+
 
 _TOKENS_JSON = os.environ.get("WHATSAPP_MCP_TOKENS_JSON", "").strip()
 if _TOKENS_JSON:
     try:
         entries = _json.loads(_TOKENS_JSON)
-        for e in entries:
-            tok = str(e.get("token", "")).strip()
-            if not tok:
-                continue
-            _TOKENS[tok] = {
-                "client_id": str(e.get("client_id", "unknown")),
-                "scopes":    list(e.get("scopes", ["whatsapp:read"])),
-            }
     except (ValueError, TypeError) as exc:
         raise SystemExit(f"WHATSAPP_MCP_TOKENS_JSON is invalid JSON: {exc}") from exc
+    if not isinstance(entries, list):
+        raise SystemExit("WHATSAPP_MCP_TOKENS_JSON must be a JSON array.")
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise SystemExit(f"Token entry {index} must be a JSON object.")
+        token = entry.get("token")
+        client_id = entry.get("client_id")
+        scopes = entry.get("scopes", ["whatsapp:read"])
+        if not isinstance(token, str) or not isinstance(client_id, str):
+            raise SystemExit(f"Token entry {index} requires string token and client_id fields.")
+        if not isinstance(scopes, list):
+            raise SystemExit(f"Token entry {index} scopes must be a JSON array.")
+        _register_token(token, client_id, scopes)
 
-# Legacy single-token fallback
+# Legacy single-token fallback. If both settings are supplied, reject overlap
+# instead of silently choosing the multi-token entry's identity and scopes.
 _LEGACY = os.environ.get("WHATSAPP_MCP_TOKEN", "").strip()
-if _LEGACY and _LEGACY not in _TOKENS:
-    _TOKENS[_LEGACY] = {"client_id": "owner", "scopes": ["whatsapp:full"]}
+if _LEGACY and _LEGACY in _TOKENS:
+    raise SystemExit(
+        "WHATSAPP_MCP_TOKEN duplicates a token configured in "
+        "WHATSAPP_MCP_TOKENS_JSON. Configure each token only once."
+    )
+if _LEGACY:
+    _register_token(_LEGACY, "owner", ["whatsapp:full"])
 
 if not _TOKENS:
     raise SystemExit(
@@ -74,11 +110,10 @@ if not _TOKENS:
         "WHATSAPP_MCP_TOKENS_JSON. Refusing to serve unauthenticated."
     )
 
-# FastMCP's StaticTokenVerifier requires a global required_scopes; we cannot
-# enforce per-tool scope there. Instead we grant every token the umbrella
-# scope "whatsapp:authenticated" so requests pass the transport-level check,
-# then let the ObservabilityMiddleware (or a new AuthzMiddleware) reject
-# per-tool at dispatch time based on the token's declared scopes.
+# FastMCP's StaticTokenVerifier requires a global required_scopes; it cannot
+# enforce our per-tool scope matrix by itself. Give verified tokens the umbrella
+# transport scope, then enforce each registered tool's declared policy in
+# AuthzMiddleware. This is token-level authorization, not account ownership.
 _verifier_tokens: dict[str, dict] = {}
 for _tok, _meta in _TOKENS.items():
     _verifier_tokens[_tok] = {
@@ -95,8 +130,11 @@ auth = StaticTokenVerifier(
 mcp = FastMCP(
     name="whatsapp",
     instructions=(
-        "Private WhatsApp access for the owner. Search contacts and chats, read "
-        "message history with context, send messages/files/voice notes, and "
+        "Private WhatsApp access for the authenticated client. Available actions "
+        "depend on the bearer token's configured scopes. Account ownership isolation "
+        "is not yet wired end-to-end; do not treat this server as multi-tenant safe. "
+        "Search contacts and chats, read message history with context, send "
+        "messages/files/voice notes, and "
         "download media. Phone numbers use country code with no + or symbols; "
         "group chats use the @g.us JID.\n"
         "IDENTITY: one person appears under BOTH their phone number (in DMs) and a "
@@ -239,24 +277,11 @@ from observability import AuthzMiddleware
 mcp.add_middleware(AuthzMiddleware())
 mcp.add_middleware(ObservabilityMiddleware())
 
-mcp.add_middleware(ResponseCachingMiddleware(
-    call_tool_settings={
-        "ttl": 30,
-        "included_tools": [
-            "list_chats",
-            "search_contacts",
-            "get_chat",
-            "get_direct_chat_by_contact",
-            "get_contact_chats",
-            "get_last_interaction",
-            "get_message_context",
-            "list_messages",
-            "bridge_health",
-            "get_profile_picture",
-        ],
-    },
-    list_tools_settings={"ttl": 300},  # tool registry changes only on redeploy
-))
+# Response caching is intentionally disabled. The current deployment has one shared
+# WhatsApp identity, and the locked FastMCP cache key has not been proven to include
+# authenticated principal + authorized account identity. Re-enable only after
+# account-aware cache keys and cross-principal isolation tests exist.
+
 
 
 @mcp.custom_route("/health", methods=["GET"])
