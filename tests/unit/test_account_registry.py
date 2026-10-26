@@ -529,3 +529,14 @@ def test_owner_cannot_activate_pending_account_without_bridge_confirmation(regis
     registry.require_account_access("alice", account, "manage")
     with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
         registry.require_account_access("alice", account, "read")
+
+
+def test_owner_ownership_record_cannot_be_revoked_as_a_shared_grant(registry):
+    account = pair(registry)
+
+    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+        registry.revoke_access("alice", "alice", account)
+
+    registry.require_account_access("alice", account, "manage")
+    registry.grant_access("alice", "bob", account, "reader")
+    registry.require_account_access("bob", account, "read")
