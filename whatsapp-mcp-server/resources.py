@@ -39,7 +39,7 @@ def register(mcp) -> None:
     # media.fetch_media, not whatsapp.download_media: the bridge cannot serve
     # revoked media and its media-retry fallback needs the sender's phone
     # online, so resources hit the same failures the tools used to.
-    from media import MediaError, fetch_media as _fetch_media
+    from media import fetch_media as _fetch_media
 
     @mcp.resource(
         "chat://{chat_jid}",
