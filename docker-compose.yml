@@ -69,7 +69,10 @@ services:
     cpus: "0.5"
     depends_on: [bridge]
     environment:
-      WHATSAPP_MCP_TOKEN: ${WHATSAPP_MCP_TOKEN:?set WHATSAPP_MCP_TOKEN in .env}
+      # Set either the legacy single token or a JSON list of scoped tokens.
+      # The application refuses to start if neither configuration is present.
+      WHATSAPP_MCP_TOKEN: ${WHATSAPP_MCP_TOKEN:-}
+      WHATSAPP_MCP_TOKENS_JSON: ${WHATSAPP_MCP_TOKENS_JSON:-}
       WHATSAPP_API_BASE_URL: http://bridge:8080/api
       MESSAGES_DB_PATH: /data/store/messages.db
       WHATSAPP_MCP_LOG_LEVEL: ${WHATSAPP_MCP_LOG_LEVEL:-INFO}
