@@ -247,6 +247,8 @@ class AccountRegistry:
         )
         if not isinstance(status, str) or status not in ACCOUNT_STATUSES:
             raise ValueError("Invalid account status")
+        if status != "pending_pairing":
+            raise ValueError("New accounts must start in pending_pairing")
         with self._lock:
             try:
                 self._db.execute("BEGIN IMMEDIATE")
@@ -337,9 +339,11 @@ class AccountRegistry:
     def set_account_status(
         self, actor_principal_id: str, account_id: str, status: str
     ) -> None:
-        """Change lifecycle state only when the active owner may manage the account."""
+        """Allow an owner to disconnect/revoke; bridge states are controller-owned."""
         if not isinstance(status, str) or status not in ACCOUNT_STATUSES:
             raise ValueError("Invalid account status")
+        if status not in {"disconnected", "revoked"}:
+            raise ValueError("Account status is controlled by bridge lifecycle")
         actor = self._required_id(actor_principal_id, "actor_principal_id")
         account = self._required_id(account_id, "account_id")
         with self._lock:
