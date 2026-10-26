@@ -21,6 +21,17 @@ OWNERSHIP_ROLES: Final = frozenset({"owner", "operator", "reader"})
 OWNERSHIP_STATUSES: Final = frozenset({"active", "revoked"})
 ACTIONS: Final = frozenset({"read", "send", "manage"})
 
+_REQUIRED_COLUMNS: Final = {
+    "schema_migrations": frozenset({"version", "applied_at"}),
+    "platform_principals": frozenset({"principal_id", "status", "created_at"}),
+    "whatsapp_accounts": frozenset(
+        {"account_id", "status", "created_at", "updated_at"}
+    ),
+    "account_ownership": frozenset(
+        {"principal_id", "account_id", "role", "status", "created_at"}
+    ),
+}
+
 _ROLE_ACTIONS: Final = {
     "owner": ACTIONS,
     "operator": frozenset({"read", "send"}),
@@ -94,6 +105,17 @@ class AccountRegistry:
                 if versions and max(versions) > SCHEMA_VERSION:
                     raise RuntimeError(
                         "Registry schema is newer than this application supports"
+                    )
+            # CREATE TABLE IF NOT EXISTS cannot repair an incompatible table
+            # that happens to reuse a registry table name. Reject it before
+            # any DDL so initialization does not partially mutate that file.
+            for table in existing_tables:
+                columns = {
+                    row["name"] for row in self._db.execute(f"PRAGMA table_info({table})")
+                }
+                if not _REQUIRED_COLUMNS[table] <= columns:
+                    raise RuntimeError(
+                        "Registry database contains a malformed table; refusing to initialize"
                     )
             self._db.executescript(
                 """
