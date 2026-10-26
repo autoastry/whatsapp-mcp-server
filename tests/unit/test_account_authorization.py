@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -16,7 +17,13 @@ def registry(tmp_path):
     value = AccountRegistry(tmp_path / "platform.db")
     value.create_principal("alice")
     value.create_principal("bob")
-    value.create_account("alice", "alice-account", "active")
+    account_id = value.create_account("alice", "alice-account")
+    # Simulate a trusted bridge lifecycle update; owner APIs must not set active.
+    with sqlite3.connect(value.db_path) as db:
+        db.execute(
+            "UPDATE whatsapp_accounts SET status = 'active' WHERE account_id = ?",
+            (account_id,),
+        )
     yield value
     value.close()
 
