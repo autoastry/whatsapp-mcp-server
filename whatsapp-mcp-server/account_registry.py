@@ -31,6 +31,18 @@ _REQUIRED_COLUMNS: Final = {
         {"principal_id", "account_id", "role", "status", "created_at"}
     ),
 }
+_REQUIRED_PRIMARY_KEYS: Final = {
+    "schema_migrations": ("version",),
+    "platform_principals": ("principal_id",),
+    "whatsapp_accounts": ("account_id",),
+    "account_ownership": ("principal_id", "account_id"),
+}
+_REQUIRED_OWNERSHIP_FOREIGN_KEYS: Final = frozenset(
+    {
+        ("principal_id", "platform_principals", "principal_id"),
+        ("account_id", "whatsapp_accounts", "account_id"),
+    }
+)
 
 _ROLE_ACTIONS: Final = {
     "owner": ACTIONS,
@@ -110,10 +122,28 @@ class AccountRegistry:
             # that happens to reuse a registry table name. Reject it before
             # any DDL so initialization does not partially mutate that file.
             for table in existing_tables:
-                columns = {
-                    row["name"] for row in self._db.execute(f"PRAGMA table_info({table})")
+                info = list(self._db.execute(f"PRAGMA table_info({table})"))
+                columns = {row["name"] for row in info}
+                primary_key = tuple(
+                    row["name"]
+                    for row in sorted(
+                        (row for row in info if row["pk"]),
+                        key=lambda row: row["pk"],
+                    )
+                )
+                if (
+                    not _REQUIRED_COLUMNS[table] <= columns
+                    or primary_key != _REQUIRED_PRIMARY_KEYS[table]
+                ):
+                    raise RuntimeError(
+                        "Registry database contains a malformed table; refusing to initialize"
+                    )
+            if "account_ownership" in existing_tables:
+                foreign_keys = {
+                    (row["from"], row["table"], row["to"])
+                    for row in self._db.execute("PRAGMA foreign_key_list(account_ownership)")
                 }
-                if not _REQUIRED_COLUMNS[table] <= columns:
+                if not _REQUIRED_OWNERSHIP_FOREIGN_KEYS <= foreign_keys:
                     raise RuntimeError(
                         "Registry database contains a malformed table; refusing to initialize"
                     )
