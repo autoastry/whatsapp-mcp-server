@@ -49,19 +49,25 @@ def register(mcp) -> None:
     )
     def chat_resource(chat_jid: str) -> str:
         _require_resource_read_scope()
-        chat = _get_chat(chat_jid, include_last_message=True)
-        msgs = _list_messages(chat_jid=chat_jid, limit=20, include_context=False)
-        # dataclasses -> dict
-        chat_d = chat.__dict__ if chat else None
-        if chat_d and chat_d.get("last_message_time"):
-            chat_d["last_message_time"] = chat_d["last_message_time"].isoformat()
-        msg_ds = []
-        for m in (msgs or []):
-            d = m.__dict__.copy()
-            if d.get("timestamp"):
-                d["timestamp"] = d["timestamp"].isoformat()
-            msg_ds.append(d)
-        return json.dumps({"chat": chat_d, "messages": msg_ds}, ensure_ascii=False)
+        try:
+            chat = _get_chat(chat_jid, include_last_message=True)
+            msgs = _list_messages(chat_jid=chat_jid, limit=20, include_context=False)
+            # dataclasses -> dict
+            chat_d = chat.__dict__ if chat else None
+            if chat_d and chat_d.get("last_message_time"):
+                chat_d["last_message_time"] = chat_d["last_message_time"].isoformat()
+            msg_ds = []
+            for m in (msgs or []):
+                d = m.__dict__.copy()
+                if d.get("timestamp"):
+                    d["timestamp"] = d["timestamp"].isoformat()
+                msg_ds.append(d)
+            return json.dumps({"chat": chat_d, "messages": msg_ds}, ensure_ascii=False)
+        except Exception as exc:
+            log.warning("chat resource read failed (%s)", type(exc).__name__)
+            from fastmcp.exceptions import ToolError
+
+            raise ToolError("Unable to read chat resource") from exc
 
     @mcp.resource(
         "message://{message_id}/{chat_jid}",
@@ -94,17 +100,17 @@ def register(mcp) -> None:
         _require_resource_read_scope()
         try:
             info = _fetch_media(message_id, chat_jid)
-        except MediaError as exc:
+            import base64
+
+            return {
+                "blob": base64.b64encode(info["path"].read_bytes()).decode("ascii"),
+                "mimeType": info.get("mime", "application/octet-stream"),
+            }
+        except Exception as exc:
             # Keep bridge paths, URLs, and downstream exception text out of the
-            # resource body. Detailed message/media diagnostics are not safe for
-            # an MCP client response.
+            # resource body, including local file-read errors after fetching.
             log.warning("media resource read failed (%s)", type(exc).__name__)
             return {
                 "blob": json.dumps({"error": "Unable to read media resource"}).encode(),
                 "mimeType": "application/json",
             }
-        import base64
-        return {
-            "blob": base64.b64encode(info["path"].read_bytes()).decode("ascii"),
-            "mimeType": info.get("mime", "application/octet-stream"),
-        }
