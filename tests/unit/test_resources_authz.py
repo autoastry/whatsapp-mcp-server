@@ -197,3 +197,24 @@ def test_media_resource_redacts_local_file_read_exception(monkeypatch, caplog):
     assert body == {"error": "Unable to read media resource"}
     assert "secret-token" not in caplog.text
     assert "/private/messages" not in caplog.text
+
+
+def test_message_resource_rejects_message_from_different_chat(monkeypatch):
+    import json
+    import whatsapp
+
+    _read_scoped_token(monkeypatch)
+    monkeypatch.setattr(
+        whatsapp,
+        "get_message_context",
+        lambda *args, **kwargs: SimpleNamespace(
+            message=SimpleNamespace(chat_jid="different-chat")
+        ),
+    )
+    registry = _ResourceRegistry()
+    resources.register(registry)
+
+    result = json.loads(
+        registry.handlers["message_resource"]("message-id", "requested-chat")
+    )
+    assert result == {"error": "Unable to read message resource"}
