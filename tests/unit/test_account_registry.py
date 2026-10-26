@@ -462,3 +462,24 @@ def test_access_check_denies_wrong_action_types_and_values(registry, invalid_act
     account = pair(registry)
     with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
         registry.require_account_access("alice", account, invalid_action)
+
+
+@pytest.mark.parametrize("invalid_status", [None, [], 7, "unknown"])
+def test_principal_creation_rejects_wrong_status_types_and_values(
+    registry, invalid_status
+):
+    with pytest.raises(ValueError, match="Invalid principal status"):
+        registry.create_principal("alice", invalid_status)
+
+
+@pytest.mark.parametrize("invalid_status", [None, [], 7, "unknown"])
+def test_account_creation_rejects_wrong_status_types_and_values(
+    registry, invalid_status
+):
+    registry.create_principal("alice")
+    with pytest.raises(ValueError, match="Invalid account status"):
+        registry.create_account("alice", "invalid-status-account", invalid_status)
+
+    with registry._lock:
+        accounts = registry._db.execute("SELECT account_id FROM whatsapp_accounts").fetchall()
+    assert accounts == []
