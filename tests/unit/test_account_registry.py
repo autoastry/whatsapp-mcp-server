@@ -205,3 +205,15 @@ def test_owner_can_restore_revoked_non_owner_grant_with_explicit_grant(registry)
     registry.require_account_access("bob", account, "send")
     with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
         registry.require_account_access("bob", account, "manage")
+
+
+def test_grant_cannot_downgrade_existing_account_owner(registry):
+    account = pair(registry)
+
+    with pytest.raises(AuthorizationDenied, match="^Account access denied$"):
+        registry.grant_access("alice", "alice", account, "reader")
+
+    # Failed grant must roll back and preserve the original owner authority.
+    registry.require_account_access("alice", account, "manage")
+    registry.grant_access("alice", "bob", account, "reader")
+    registry.require_account_access("bob", account, "read")
