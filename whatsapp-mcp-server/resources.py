@@ -81,6 +81,10 @@ def register(mcp) -> None:
         try:
             ctx = _get_ctx(message_id, before=0, after=0)
             m = ctx.message
+            # The URI contains both identifiers; do not silently ignore the
+            # chat component when resolving a message resource.
+            if getattr(m, "chat_jid", None) != chat_jid:
+                raise ValueError("Message unavailable")
             d = m.__dict__.copy()
             if d.get("timestamp"):
                 d["timestamp"] = d["timestamp"].isoformat()
