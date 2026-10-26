@@ -540,3 +540,13 @@ def test_owner_ownership_record_cannot_be_revoked_as_a_shared_grant(registry):
     registry.require_account_access("alice", account, "manage")
     registry.grant_access("alice", "bob", account, "reader")
     registry.require_account_access("bob", account, "read")
+
+
+def test_registry_rejects_oversized_principal_and_account_identifiers(registry):
+    oversized = "x" * 257
+    with pytest.raises(ValueError, match="principal_id must be at most 256 characters"):
+        registry.create_principal(oversized)
+
+    registry.create_principal("alice")
+    with pytest.raises(ValueError, match="account_id must be at most 256 characters"):
+        registry.create_account("alice", oversized)
