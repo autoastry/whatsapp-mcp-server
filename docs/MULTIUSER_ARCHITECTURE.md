@@ -336,3 +336,14 @@ Regression tests cover mapped access, cross-account denial, absent identity,
 unmapped-client denial, and a mapping that points to an unprovisioned principal.
 This is still an internal helper only: no FastMCP middleware or existing WhatsApp
 tool invokes it yet, so it must not be represented as end-to-end isolation.
+
+
+## 15. Registry transaction and revocation boundaries (2026-10-26)
+
+The isolated registry now uses SQLite write transactions (BEGIN IMMEDIATE) around account creation, sharing grants, sharing revocation, and account lifecycle status changes. This serializes authorization decisions and writes across separate registry connections, not just threads sharing one AccountRegistry instance. Grant upserts must never downgrade an existing owner row; a conflicting grant against an owner is denied and rolled back. Offline tests cover this invariant and concurrent grant/revoke calls from two registry instances.
+
+These transactions protect registry consistency only. They do not make an external WhatsApp send atomic with authorization: a permission can be revoked after a tool checks access but before a bridge operation finishes. Before account authorization is wired into tools, the service must define an in-flight revocation contract. At minimum, authorize immediately before dispatch, bind the selected account to trusted request context (never a user-supplied account ID alone), and have the session manager reject new work after revocation. For stronger guarantees, use account-generation/fencing tokens checked by the bridge at dispatch and on queued jobs; cancel pending jobs and make any already-dispatched send outcome explicit as potentially ambiguous. Do not claim revocation can retract a message already handed to WhatsApp.
+
+Lifecycle status is also a policy seam, not proof of WhatsApp authentication. Setting a registry row to active must eventually be driven by a trusted lifecycle controller after the bridge confirms a valid linked-device session; an owner or tool argument must not be allowed to manufacture a successful pairing state. The current registry is not wired to such a controller, so these changes do not yet establish production enforcement.
+
+**Verification boundary:** hosted CI validates unit behavior only. No multi-process deployment, Docker backup/restore rehearsal, live pairing, or real-session recovery was performed in this environment. Phase 1 and runtime multi-user implementation remain blocked on the operational rehearsal and repository history review.
